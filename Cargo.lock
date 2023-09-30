@@ -1282,11 +1282,15 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "log",
+ "reqwest",
+ "serde",
+ "serde_json",
  "tectonic",
  "tectonic_bridge_core",
  "tectonic_bundles",
  "tectonic_engine_xetex",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -2668,6 +2672,7 @@ dependencies = [
  "libc",
  "mio",
  "num_cpus",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2 0.5.4",

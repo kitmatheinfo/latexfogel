@@ -1,6 +1,8 @@
 use std::path::Path;
 
 mod pdf;
+mod wolframalpha;
+mod latex;
 
 fn main() {
     let latex = r"
