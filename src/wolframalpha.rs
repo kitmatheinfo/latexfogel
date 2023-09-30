@@ -1,4 +1,4 @@
-use image::{DynamicImage, GenericImage, GenericImageView, Pixel, RgbImage};
+use image::{DynamicImage, GenericImageView, Pixel, RgbImage};
 
 pub struct WolframAlpha {
     api_key: String,

@@ -1,14 +1,29 @@
+use std::collections::HashMap;
 use std::io::Cursor;
+use std::sync::Arc;
 
 use image::ImageFormat;
-use poise::serenity_prelude::{AttachmentType, GatewayIntents};
+use poise::serenity_prelude::{AttachmentType, MessageId};
 use poise::PrefixFrameworkOptions;
+use poise::{serenity_prelude as serenity, ReplyHandle};
+use serenity::GatewayIntents;
+use tokio::sync::Mutex;
 
 use crate::latex;
 use crate::wolframalpha::{WolframAlpha, WolframAlphaSimpleResult};
 
 pub struct BotContext {
     pub wolfram_alpha: WolframAlpha,
+    tex_cache: Arc<Mutex<HashMap<MessageId, MessageId>>>,
+}
+
+impl BotContext {
+    pub fn new(wolfram_alpha: WolframAlpha) -> Self {
+        Self {
+            wolfram_alpha,
+            tex_cache: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
 }
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -59,25 +74,58 @@ async fn wolfram(
     Ok(())
 }
 
-#[poise::command(slash_command, prefix_command, track_edits)]
+#[poise::command(
+    context_menu_command = "Render LaTeX",
+    slash_command,
+    prefix_command,
+    track_edits
+)]
 async fn tex(
     ctx: Context<'_>,
     #[description = "message"]
     #[rest]
-    message: String,
+    message: serenity::Message,
 ) -> Result<(), Error> {
-    ctx.defer().await?;
-    let image = latex::render_to_png(&message)?;
+    if let Some(id) = ctx.data().tex_cache.lock().await.get(&message.id) {
+        ctx.http()
+            .delete_message(message.channel_id.0, id.0)
+            .await?;
+    }
 
-    ctx.send(|b| {
-        b.attachment(AttachmentType::Bytes {
-            data: image.into(),
-            filename: "latex.png".to_string(),
+    ctx.defer().await?;
+    let image = latex::render_to_png(&message.content);
+
+    if let Err(error) = &image {
+        let res = ctx
+            .send(|b| {
+                b.embed(|e| {
+                    e.title("Error rendering LaTeX")
+                        .description(error.to_string())
+                })
+            })
+            .await?;
+        update_tex_cache(message.id, res, ctx).await;
+        return Ok(());
+    }
+    let image = image.unwrap();
+
+    let res = ctx
+        .send(|b| {
+            b.attachment(AttachmentType::Bytes {
+                data: image.into(),
+                filename: "latex.png".to_string(),
+            })
         })
-    })
-    .await?;
+        .await?;
+    update_tex_cache(message.id, res, ctx).await;
 
     Ok(())
+}
+
+async fn update_tex_cache(message_id: MessageId, reply_handle: ReplyHandle<'_>, ctx: Context<'_>) {
+    if let Ok(msg) = reply_handle.message().await {
+        ctx.data().tex_cache.lock().await.insert(message_id, msg.id);
+    }
 }
 
 pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
@@ -85,6 +133,7 @@ pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
         .options(poise::FrameworkOptions {
             commands: vec![wolfram(), register(), tex()],
             prefix_options: PrefixFrameworkOptions {
+                prefix: Some("=".to_string()),
                 edit_tracker: Some(poise::EditTracker::for_timespan(
                     std::time::Duration::from_secs(3600),
                 )),
