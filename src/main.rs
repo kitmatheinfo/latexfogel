@@ -1,32 +1,16 @@
-use std::path::Path;
+use crate::discord::BotContext;
+use crate::wolframalpha::WolframAlpha;
 
 mod discord;
 mod latex;
 mod pdf;
 mod wolframalpha;
 
-fn main() {
-    let latex = r"
-        \documentclass[preview]{standalone}
-        \usepackage[a5paper]{geometry}
-        \usepackage{amsmath,amssymb}
-        \usepackage{xcolor}
-        \definecolor{discordbg}{HTML}{313338}
-        \begin{document}
-        \color{white}
-        \pagecolor{discordbg}
-        Dies ist ein text, text, text, text, text, text, text,text, text, text, text, text, text,
-         text,text, text, text, text, text, text, text,text, text, text, text, text, text, text,
-         text, text, text, text, text, text, text,text, text, text, text, text, text, text,text,
-         text, text, text, text, text, text,text, text, text, text, text, text, text,text, text,
-         text, text, text, text, text,text, text, text, text, text, text, text,text, text, text,
-         text, text, text, text,text, text, text, text, text, text, text,
-         $\displaystyle \frac{1}{\sum_{i = 1}^{20} 2 + 5}$
-        \end{document}
-    ";
-
-    let pdf = pdf::render_pdf(latex).unwrap();
-    let png = pdf::pdf_to_png(pdf).unwrap();
-
-    std::fs::write(Path::new("/tmp/foo.png"), png).unwrap();
+#[tokio::main]
+async fn main() {
+    discord::start_bot(BotContext::new(WolframAlpha::new(
+        std::env::var("WOLFRAM_TOKEN").expect("missing WOLFRAM_TOKEN"),
+    )))
+    .await
+    .expect("Error during bot startup");
 }
