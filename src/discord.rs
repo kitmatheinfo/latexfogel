@@ -4,6 +4,7 @@ use image::ImageFormat;
 use poise::serenity_prelude::{AttachmentType, GatewayIntents};
 use poise::PrefixFrameworkOptions;
 
+use crate::latex;
 use crate::wolframalpha::{WolframAlpha, WolframAlphaSimpleResult};
 
 pub struct BotContext {
@@ -23,7 +24,9 @@ pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
 async fn wolfram(
     ctx: Context<'_>,
     #[description = "Show full response"] full_response: Option<bool>,
-    #[description = "Query"] #[rest] query: String,
+    #[description = "Query"]
+    #[rest]
+    query: String,
 ) -> Result<(), Error> {
     ctx.defer().await?;
 
@@ -41,14 +44,38 @@ async fn wolfram(
                     filename: format!("wa{index}.png"),
                 });
             });
-            b
+            b.reply(true)
         })
         .await?;
     } else {
         let result = ctx.data().wolfram_alpha.short_answer(&query).await?;
-        ctx.send(|b| b.embed(|e| e.title("Wolfram Alpha's result").description(result)))
-            .await?;
+        ctx.send(|b| {
+            b.reply(true)
+                .embed(|e| e.title("Wolfram Alpha's result").description(result))
+        })
+        .await?;
     }
+
+    Ok(())
+}
+
+#[poise::command(slash_command, prefix_command, track_edits)]
+async fn tex(
+    ctx: Context<'_>,
+    #[description = "message"]
+    #[rest]
+    message: String,
+) -> Result<(), Error> {
+    ctx.defer().await?;
+    let image = latex::render_to_png(&message)?;
+
+    ctx.send(|b| {
+        b.attachment(AttachmentType::Bytes {
+            data: image.into(),
+            filename: "latex.png".to_string(),
+        })
+    })
+    .await?;
 
     Ok(())
 }
@@ -56,9 +83,8 @@ async fn wolfram(
 pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![wolfram(), register()],
+            commands: vec![wolfram(), register(), tex()],
             prefix_options: PrefixFrameworkOptions {
-                prefix: Some("=".into()),
                 edit_tracker: Some(poise::EditTracker::for_timespan(
                     std::time::Duration::from_secs(3600),
                 )),
@@ -69,11 +95,7 @@ pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
         })
         .token(std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN"))
         .intents(GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT)
-        .setup(|_ctx, _ready, _framework| {
-            Box::pin(async move {
-                Ok(bot_context)
-            })
-        });
+        .setup(|_ctx, _ready, _framework| Box::pin(async move { Ok(bot_context) }));
 
     Ok(framework.run().await?)
 }

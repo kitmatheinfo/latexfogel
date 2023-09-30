@@ -13,7 +13,7 @@ pub fn render_to_png(input: &str) -> anyhow::Result<Vec<u8>> {
         {{input}}
         \end{document}
     "
-    .replace("{{inpu}}", input);
+    .replace("{{input}}", input);
 
     pdf::pdf_to_png(pdf::render_pdf(&latex)?)
 }
