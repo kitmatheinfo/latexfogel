@@ -1,8 +1,9 @@
 use std::path::Path;
 
+mod discord;
+mod latex;
 mod pdf;
 mod wolframalpha;
-mod latex;
 
 fn main() {
     let latex = r"

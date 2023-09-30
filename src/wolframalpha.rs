@@ -1,22 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-const USEFUL_PODS: [&str; 6] = [
-    "solution",
-    "result",
-    "biological properties",
-    "image",
-    "color swatch",
-    "related colors",
-];
-
-fn is_useful_pod(pod_title: &str) -> bool {
-    for useful_pod in USEFUL_PODS {
-        if useful_pod.eq_ignore_ascii_case(pod_title) {
-            return true;
-        }
-    }
-    false
-}
+use image::{DynamicImage, GenericImage, GenericImageView, Pixel, RgbImage};
 
 pub struct WolframAlpha {
     api_key: String,
@@ -31,21 +13,29 @@ impl WolframAlpha {
         }
     }
 
-    pub async fn query(&self, query: &str) -> anyhow::Result<WolframAlphaResult> {
-        let result = self.get_response(query).await?;
-        Ok(serde_json::from_str(&result)?)
-    }
-
-    async fn get_response(&self, query: &str) -> anyhow::Result<String> {
+    pub async fn simple_query(&self, query: &str) -> anyhow::Result<WolframAlphaSimpleResult> {
         let response = self
             .reqwest
-            .get("https://api.wolframalpha.com/v2/query")
+            .get("https://api.wolframalpha.com/v1/simple")
             .query(&vec![
-                ("input", query),
-                ("format", "image,plaintext"),
-                ("output", "JSON"),
+                ("i", query),
+                ("units", "metric"),
                 ("appid", &self.api_key),
+                ("layout", "labelbar"),
             ])
+            .send()
+            .await?;
+
+        Ok(WolframAlphaSimpleResult {
+            img: response.bytes().await?.to_vec(),
+        })
+    }
+
+    pub async fn short_answer(&self, query: &str) -> anyhow::Result<String> {
+        let response = self
+            .reqwest
+            .get("https://api.wolframalpha.com/v1/result")
+            .query(&vec![("i", query), ("appid", &self.api_key)])
             .send()
             .await?;
 
@@ -53,57 +43,81 @@ impl WolframAlpha {
     }
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WolframAlphaResult {
-    pub queryresult: Queryresult,
+pub struct WolframAlphaSimpleResult {
+    pub img: Vec<u8>,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Queryresult {
-    pub success: bool,
-    pub error: bool,
-    pub numpods: i64,
-    pub timing: f64,
-    pub pods: Vec<Pod>,
-}
+impl WolframAlphaSimpleResult {
+    pub fn slice_image(&self) -> anyhow::Result<Vec<DynamicImage>> {
+        let img = image::load_from_memory(&self.img)?;
+        let mut slices: Vec<(u32, u32)> = Vec::new();
+        let mut slice_top = 0;
+        let mut in_marker = false;
 
-impl Queryresult {
-    pub fn filtered_pods(&self) -> Vec<Pod> {
-        self.pods
-            .iter()
-            .filter(|pod| is_useful_pod(&pod.title))
-            .cloned()
+        let column = (0..img.height())
+            .map(|y| (y, img.get_pixel(1, y).to_rgb()))
+            // Skip leading image
+            .skip_while(|(_, px)| px.0 == [255; 3]);
+
+        for (y, pixel) in column {
+            // Begin of marker
+            if !in_marker && pixel.0 != [255; 3] {
+                in_marker = true;
+                slices.push((slice_top, y - 1));
+                slice_top = y;
+            }
+            // end of marker
+            else if in_marker && pixel.0 == [255; 3] {
+                in_marker = false;
+            }
+        }
+        if slice_top < img.height() - 1 {
+            slices.push((slice_top, img.height() - 1));
+        }
+
+        let mut image_slices = vec![];
+        for (start, end) in slices {
+            image_slices.push(img.crop_imm(0, start, img.width(), end - start + 1));
+        }
+
+        Ok(image_slices)
+    }
+
+    pub fn group_images(images: Vec<DynamicImage>, max_height: u32) -> Vec<RgbImage> {
+        let mut groups = Vec::new();
+        let mut current_group = Vec::new();
+        let mut current_height = 0;
+
+        for img in images {
+            if current_height + img.height() > max_height && !current_group.is_empty() {
+                groups.push(current_group);
+                current_group = Vec::new();
+                current_height = 0;
+            }
+            current_height += img.height();
+            current_group.push(img);
+        }
+        if !current_group.is_empty() {
+            groups.push(current_group);
+        }
+
+        groups
+            .into_iter()
+            .map(|group| {
+                let height: u32 = group.iter().map(|img| img.height()).sum();
+                let mut img = RgbImage::new(group[0].width(), height);
+                let mut current_y = 0;
+                for slice in group {
+                    for x in 0..slice.width() {
+                        for y in 0..slice.height() {
+                            img.put_pixel(x, y + current_y, slice.get_pixel(x, y).to_rgb());
+                        }
+                    }
+                    current_y += slice.height();
+                }
+
+                img
+            })
             .collect()
     }
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Pod {
-    pub title: String,
-    pub position: i64,
-    pub error: bool,
-    pub subpods: Vec<Subpod>,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Subpod {
-    pub img: Img,
-    pub plaintext: String,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Img {
-    pub src: String,
-    pub alt: String,
-    pub title: String,
-    pub width: i64,
-    pub height: i64,
-    #[serde(rename = "type")]
-    pub type_field: String,
-    pub colorinvertable: bool,
 }
