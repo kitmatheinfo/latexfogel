@@ -12,36 +12,51 @@ use tectonic_bridge_core::{SecuritySettings, SecurityStance};
 const FILE_NAME: &str = "foo";
 
 #[derive(Default)]
-struct StringStatusBackend {
-    output: Rc<RefCell<String>>,
+struct StatusBackendState {
+    errors: Vec<String>,
+    warnings: Vec<String>,
 }
+
+impl StatusBackendState {
+    fn overrun_hbox(&self) -> bool {
+        self.warnings
+            .iter()
+            .any(|it| it.contains(r"Overfull \hbox"))
+    }
+}
+
+#[derive(Default)]
+struct StringStatusBackend(Rc<RefCell<StatusBackendState>>);
 
 impl StatusBackend for StringStatusBackend {
     fn report(&mut self, kind: MessageKind, args: Arguments, err: Option<&anyhow::Error>) {
+        if kind == MessageKind::Warning {
+            self.0.borrow_mut().warnings.push(format!("{args}"));
+        }
         if kind != MessageKind::Error {
             return;
         }
         if let Some(err) = err {
-            *self.output.borrow_mut() = format!("{}\n{}: {}", self.output.borrow(), args, err);
+            self.0.borrow_mut().errors.push(format!("{args}: {err}"));
         } else {
-            *self.output.borrow_mut() = format!("{}\n{}", self.output.borrow(), args)
+            self.0.borrow_mut().errors.push(format!("{args}"));
         }
     }
 
     fn dump_error_logs(&mut self, output: &[u8]) {
-        if let Ok(output) = String::from_utf8(Vec::from(output)) {
-            *self.output.borrow_mut() = format!("{}\n{}", self.output.borrow(), output);
-        } else {
-            *self.output.borrow_mut() = format!("{}\nInvalid utf-8", self.output.borrow());
-        }
+        let foo = String::from_utf8_lossy(output);
+        self.0.borrow_mut().errors.push(foo.to_string());
     }
 }
 
-pub fn render_pdf(latex: &str) -> anyhow::Result<Vec<u8>> {
-    let status_string = Rc::new(RefCell::new(String::new()));
-    let status_backend = StringStatusBackend {
-        output: status_string.clone(),
-    };
+pub struct PdfResult {
+    pub pdf: Vec<u8>,
+    pub overrun_hbox: bool,
+}
+
+pub fn render_pdf(latex: &str) -> anyhow::Result<PdfResult> {
+    let status_state = Rc::new(RefCell::new(StatusBackendState::default()));
+    let status_backend = StringStatusBackend(status_state.clone());
     let mut status_backend = Box::new(status_backend) as Box<dyn StatusBackend>;
     let security = SecuritySettings::new(SecurityStance::DisableInsecures);
     let mut session_builder = ProcessingSessionBuilder::new_with_security(security);
@@ -68,11 +83,14 @@ pub fn render_pdf(latex: &str) -> anyhow::Result<Vec<u8>> {
     let result = session.run(&mut *status_backend);
 
     if let Err(e) = &result {
-        return handle_error(status_string, &mut status_backend, &mut session, e);
+        return handle_error(status_state, &mut status_backend, &mut session, e);
     }
 
     return match session.into_file_data().get(&format!("{FILE_NAME}.pdf")) {
-        Some(file) => Ok(file.data.clone()),
+        Some(file) => Ok(PdfResult {
+            pdf: file.data.clone(),
+            overrun_hbox: status_state.borrow().overrun_hbox(),
+        }),
         None => Err(anyhow!("Got no output file")),
     };
 }
@@ -90,11 +108,11 @@ fn create_session(
 }
 
 fn handle_error(
-    status_string: Rc<RefCell<String>>,
+    status_string: Rc<RefCell<StatusBackendState>>,
     status_backend: &mut Box<dyn StatusBackend>,
     session: &mut ProcessingSession,
     e: &Error,
-) -> anyhow::Result<Vec<u8>> {
+) -> anyhow::Result<PdfResult> {
     if let ErrorKind::EngineError(engine) = e.kind() {
         let output = session.get_stdout_content();
 
@@ -116,7 +134,7 @@ fn handle_error(
     Err(anyhow!(
         "**{}**\n```\n{}\n```",
         e.kind(),
-        status_string.borrow().trim()
+        status_string.borrow().errors.join("\n")
     ))
 }
 

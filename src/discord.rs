@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use image::ImageFormat;
 use poise::serenity_prelude::{
-    AttachmentType, ButtonStyle, CreateActionRow, CreateButton, Member, Message,
+    AttachmentType, ButtonStyle, CreateActionRow, CreateButton, CreateComponents, Member, Message,
     MessageComponentInteraction, MessageId, ReactionType, User, UserId,
 };
 use poise::{serenity_prelude as serenity, Event};
@@ -14,13 +15,22 @@ use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
 
 use crate::latex;
+use crate::latex::ImageWidth;
 use crate::wolframalpha::{WolframAlpha, WolframAlphaSimpleResult};
 
 const DELETE_CUSTOM_ID: &str = "delete";
+const WIDEN_CUSTOM_ID: &str = "widen";
 
 pub struct BotContext {
-    pub wolfram_alpha: WolframAlpha,
+    wolfram_alpha: WolframAlpha,
     tex_cache: Arc<Mutex<HashMap<MessageId, MessageId>>>,
+    wider_cache: Arc<Mutex<HashMap<MessageId, WideCacheEntry>>>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct WideCacheEntry {
+    owner: UserId,
+    latex: String,
 }
 
 impl BotContext {
@@ -28,6 +38,7 @@ impl BotContext {
         Self {
             wolfram_alpha,
             tex_cache: Arc::new(Mutex::new(HashMap::new())),
+            wider_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -36,17 +47,23 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, BotContext, Error>;
 
 fn add_delete_buttons(owner: UserId, builder: &mut CreateReply) {
-    builder.components(|b| {
-        let mut action_row = CreateActionRow::default();
-        let mut button = CreateButton::default();
-        button
-            .label("Delete")
-            .style(ButtonStyle::Danger)
-            .emoji(ReactionType::Unicode("🗑️".to_string()))
-            .custom_id(format!("{DELETE_CUSTOM_ID}{}", owner.0));
-        action_row.add_button(button);
-        b.add_action_row(action_row)
-    });
+    builder.components(|b| action_row_delete(owner, b));
+}
+
+fn action_row_delete(owner: UserId, b: &mut CreateComponents) -> &mut CreateComponents {
+    let mut action_row = CreateActionRow::default();
+    action_row.add_button(button_delete(owner));
+    b.add_action_row(action_row)
+}
+
+fn button_delete(owner: UserId) -> CreateButton {
+    let mut button = CreateButton::default();
+    button
+        .label("Delete")
+        .style(ButtonStyle::Danger)
+        .emoji(ReactionType::Unicode("🗑️".to_string()))
+        .custom_id(format!("{DELETE_CUSTOM_ID}{}", owner.0));
+    button
 }
 
 #[poise::command(prefix_command)]
@@ -103,8 +120,9 @@ async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Erro
     }
 
     ctx.defer().await?;
-    let latex = message.content;
-    let image = spawn_blocking(move || latex::render_to_png(&latex)).await?;
+
+    let latex = message.content.clone();
+    let image = spawn_blocking(move || latex::render_to_png(ImageWidth::Normal, &latex)).await?;
 
     if let Err(error) = &image {
         let res = ctx
@@ -116,7 +134,7 @@ async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Erro
                 })
             })
             .await?;
-        update_tex_cache(message.id, &res, ctx).await;
+        let _ = update_tex_cache(message.id, &res, ctx).await;
         return Ok(());
     }
     let image = image.unwrap();
@@ -124,24 +142,55 @@ async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Erro
     let res = ctx
         .send(|b| {
             b.attachment(AttachmentType::Bytes {
-                data: image.into(),
+                data: image.png.into(),
                 filename: "latex.png".to_string(),
-            })
+            });
+            if image.overrun_hbox {
+                let mut action_row = CreateActionRow::default();
+                action_row.add_button(button_delete(ctx.author().id));
+                action_row.add_button(button_wider(ctx.author().id));
+                b.components(|b| b.add_action_row(action_row));
+            }
+            b
         })
         .await?;
-    update_tex_cache(message.id, &res, ctx).await;
+    let our_reply = update_tex_cache(message.id, &res, ctx).await;
+    if image.overrun_hbox {
+        if let Ok(msg_id) = our_reply {
+            let wide_cache_entry = WideCacheEntry {
+                owner: ctx.author().id,
+                latex: message.content,
+            };
+            ctx.data()
+                .wider_cache
+                .lock()
+                .await
+                .insert(msg_id, wide_cache_entry);
+        }
+    }
 
     Ok(())
+}
+fn button_wider(owner: UserId) -> CreateButton {
+    let mut button = CreateButton::default();
+    button
+        .label("Expand")
+        .style(ButtonStyle::Primary)
+        .emoji(ReactionType::Unicode("↔️".to_string()))
+        .custom_id(format!("{WIDEN_CUSTOM_ID}{}", owner.0));
+    button
 }
 
 async fn update_tex_cache<'a>(
     message_id: MessageId,
     reply_handle: &'a poise::ReplyHandle<'a>,
     ctx: Context<'a>,
-) {
+) -> anyhow::Result<MessageId> {
     if let Ok(msg) = reply_handle.message().await {
         ctx.data().tex_cache.lock().await.insert(message_id, msg.id);
+        return Ok(msg.id);
     }
+    Err(anyhow!("Error replying to message when updating tex cache"))
 }
 
 async fn handle_event<'a>(
@@ -154,7 +203,9 @@ async fn handle_event<'a>(
         if let Some(cmd) = interaction.as_message_component() {
             if let Some(member) = &cmd.member {
                 if cmd.data.custom_id.starts_with(DELETE_CUSTOM_ID) {
-                    handle_button_click(ctx, cmd, member).await?;
+                    handle_delete_button_click(ctx, cmd, member).await?;
+                } else if cmd.data.custom_id.starts_with(WIDEN_CUSTOM_ID) {
+                    handle_widen_button_click(ctx, cmd, _data).await?;
                 }
             }
         }
@@ -162,7 +213,55 @@ async fn handle_event<'a>(
     Ok(())
 }
 
-async fn handle_button_click<'a>(
+async fn handle_widen_button_click<'a>(
+    ctx: &'a serenity::Context,
+    cmd: &'a MessageComponentInteraction,
+    data: &'a BotContext,
+) -> Result<(), Error> {
+    if let Some(cache) = data.wider_cache.lock().await.get(&cmd.message.id).cloned() {
+        if cache.owner != cmd.user.id {
+            return answer_action_not_allowed(ctx, cmd).await;
+        }
+
+        cmd.defer(ctx).await?;
+
+        // Should work as we re-use the LaTeX
+        let image =
+            spawn_blocking(move || latex::render_to_png(ImageWidth::Wide, &cache.latex)).await?;
+
+        cmd.get_interaction_response(ctx)
+            .await?
+            .edit(ctx, |b| {
+                b.components(|b| action_row_delete(cmd.user.id, b))
+                    .remove_all_attachments()
+                    .attachment(AttachmentType::Bytes {
+                        data: image.unwrap().png.into(),
+                        filename: "latex.png".to_string(),
+                    })
+            })
+            .await?;
+    } else {
+        answer_unknown_button(ctx, cmd).await?;
+    }
+    Ok(())
+}
+
+async fn answer_unknown_button<'a>(
+    ctx: &'a serenity::Context,
+    cmd: &'a MessageComponentInteraction,
+) -> Result<(), Error> {
+    cmd.create_interaction_response(ctx, |b| {
+        b.interaction_response_data(|b| {
+            b.ephemeral(true)
+                .embed(|e| e.title("I don't remember that button. Was it before a restart?"))
+        })
+    })
+    .await?;
+
+    Ok(())
+}
+
+async fn handle_delete_button_click<'a>(
     ctx: &'a serenity::Context,
     cmd: &'a MessageComponentInteraction,
     member: &'a Member,
@@ -177,16 +276,24 @@ async fn handle_button_click<'a>(
     if author_id == member.user.id.0 {
         cmd.message.delete(ctx).await?;
     } else {
-        cmd.create_interaction_response(ctx, |b| {
-            b.interaction_response_data(|b| {
-                b.ephemeral(true).embed(|e| {
-                    e.title("You clicked a button.")
-                        .description(interaction_unauthorized_message(&cmd.user))
-                })
+        answer_action_not_allowed(ctx, cmd).await?;
+    }
+    Ok(())
+}
+
+async fn answer_action_not_allowed<'a>(
+    ctx: &'a serenity::Context,
+    cmd: &'a MessageComponentInteraction,
+) -> Result<(), Error> {
+    cmd.create_interaction_response(ctx, |b| {
+        b.interaction_response_data(|b| {
+            b.ephemeral(true).embed(|e| {
+                e.title("You clicked a button.")
+                    .description(interaction_unauthorized_message(&cmd.user))
             })
         })
-        .await?;
-    }
+    })
+    .await?;
     Ok(())
 }
 
