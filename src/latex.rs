@@ -2,7 +2,7 @@ use crate::pdf;
 
 pub fn render_to_png(input: &str) -> anyhow::Result<Vec<u8>> {
     let latex = r"
-        \documentclass[preview]{standalone}
+        \documentclass[preview,border=2pt]{standalone}
         \usepackage[a5paper]{geometry}
         \usepackage{amsmath,amssymb}
         \usepackage{xcolor}
