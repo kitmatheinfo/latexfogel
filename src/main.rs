@@ -8,6 +8,9 @@ mod wolframalpha;
 
 #[tokio::main]
 async fn main() {
+    if !std::env::temp_dir().exists() {
+        std::fs::create_dir_all(std::env::temp_dir()).unwrap();
+    }
     discord::start_bot(BotContext::new(WolframAlpha::new(
         std::env::var("WOLFRAM_TOKEN").expect("missing WOLFRAM_TOKEN"),
     )))
