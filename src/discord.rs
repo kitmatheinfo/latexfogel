@@ -301,7 +301,7 @@ fn interaction_unauthorized_message(user: &User) -> &'static str {
     if user.id.0 == 140579104222085121 {
         "Bad bean, this isn't yours to click!"
     } else {
-        "Good job. But this output was not generated for you, you cannot delete it."
+        "Good job. But this output was not generated for you, you cannot modify it."
     }
 }
 
