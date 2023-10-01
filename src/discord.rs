@@ -223,5 +223,14 @@ pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
         .intents(GatewayIntents::non_privileged())
         .setup(|_ctx, _ready, _framework| Box::pin(async move { Ok(bot_context) }));
 
-    Ok(framework.run().await?)
+    let framework = framework.build().await?;
+    let shard_manager = framework.shard_manager().clone();
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Could not register ctrl+c handler");
+        shard_manager.lock().await.shutdown_all().await;
+    });
+
+    Ok(framework.start().await?)
 }
