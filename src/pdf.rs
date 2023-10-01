@@ -4,9 +4,9 @@ use std::process::Command;
 use std::rc::Rc;
 
 use anyhow::anyhow;
-use tectonic::{Error, ErrorKind, tt_error};
 use tectonic::driver::{OutputFormat, PassSetting, ProcessingSession, ProcessingSessionBuilder};
 use tectonic::status::{MessageKind, StatusBackend};
+use tectonic::{tt_error, Error, ErrorKind};
 use tectonic_bridge_core::{SecuritySettings, SecurityStance};
 
 const FILE_NAME: &str = "foo";
@@ -39,7 +39,9 @@ impl StatusBackend for StringStatusBackend {
 
 pub fn render_pdf(latex: &str) -> anyhow::Result<Vec<u8>> {
     let status_string = Rc::new(RefCell::new(String::new()));
-    let status_backend = StringStatusBackend { output: status_string.clone() };
+    let status_backend = StringStatusBackend {
+        output: status_string.clone(),
+    };
     let mut status_backend = Box::new(status_backend) as Box<dyn StatusBackend>;
     let security = SecuritySettings::new(SecurityStance::DisableInsecures);
     let mut session_builder = ProcessingSessionBuilder::new_with_security(security);
@@ -111,7 +113,11 @@ fn handle_error(
             status_backend.dump_error_logs(&output);
         }
     }
-    Err(anyhow!(format!("**{}**\n```\n{}\n```", e.kind(), status_string.borrow().trim())))
+    Err(anyhow!(
+        "**{}**\n```\n{}\n```",
+        e.kind(),
+        status_string.borrow().trim()
+    ))
 }
 
 pub fn pdf_to_png(pdf: Vec<u8>) -> anyhow::Result<Vec<u8>> {
@@ -120,13 +126,17 @@ pub fn pdf_to_png(pdf: Vec<u8>) -> anyhow::Result<Vec<u8>> {
     let png_path = dir.path().join("foo.png");
 
     std::fs::write(&pdf_path, pdf)?;
-    Command::new("inkscape")
+    let out = Command::new("magick")
+        .arg("-density")
+        .arg("300")
         .arg(pdf_path.to_str().unwrap())
-        .arg("-o")
         .arg(png_path.to_str().unwrap())
-        .arg("--export-dpi=300")
         .output()?;
-
-    let png_data = std::fs::read(png_path)?;
-    Ok(png_data)
+    if !out.status.success() {
+        return Err(anyhow!(
+            "Error running command: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(std::fs::read(png_path)?)
 }
