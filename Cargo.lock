@@ -1517,7 +1517,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "image",
- "log",
  "poise",
  "reqwest",
  "serde",

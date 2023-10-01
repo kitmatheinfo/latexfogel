@@ -9,8 +9,9 @@
   outputs = { self, nixpkgs, naersk }:
     let forAllSystems = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed;
     in
-    {
-      packages = forAllSystems (system:
+    rec {
+      packages = flake-packages;
+      flake-packages = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
           naersk' = pkgs.callPackage naersk { };
@@ -23,16 +24,16 @@
             };
           default = latexfogel;
           docker = pkgs.dockerTools.buildLayeredImage {
-            name = "kitmatheinfo/latexfogel";
+            name = "ghcr.io/kitmatheinfo/latexfogel";
             tag = latexfogel.version;
 
             contents = [
               latexfogel
-              pkgs.cacert                 # or reqwest is very unhappy
-              pkgs.fontconfig             # or tectonic fails
-              pkgs.bash                   # or magick can not spawn `gs`
-              pkgs.imagemagick            # to convert, imagemagick_light has no adapter
-              pkgs.ghostscript_headless   # to convert
+              pkgs.cacert # or reqwest is very unhappy
+              pkgs.fontconfig # or tectonic fails
+              pkgs.bash # or magick can not spawn `gs`
+              pkgs.imagemagick # to convert, imagemagick_light has no adapter
+              pkgs.ghostscript_headless # to convert
             ];
 
             config = {
@@ -46,5 +47,17 @@
           };
         }
       );
+      devShells = forAllSystems (system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+        in
+        rec {
+          docker = pkgs.mkShell rec {
+            publish = pkgs.writeScriptBin "publish" ''
+              chore/publish.sh "${flake-packages."${system}".docker}" "${flake-packages."${system}".docker.imageName}" "${flake-packages."${system}".docker.imageTag}" "$1"
+            '';
+            packages = [ publish ];
+          };
+        });
     };
 }
