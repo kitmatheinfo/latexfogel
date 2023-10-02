@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::bail;
 use image::ImageFormat;
-use log::{info, trace};
+use log::{info, trace, warn};
 use poise::serenity_prelude::{
     AttachmentType, ButtonStyle, CreateActionRow, CreateButton, CreateComponents, Member, Message,
     MessageComponentInteraction, MessageId, ReactionType, User, UserId,
@@ -12,6 +12,8 @@ use poise::serenity_prelude::{
 use poise::{serenity_prelude as serenity, Event};
 use poise::{CreateReply, PrefixFrameworkOptions};
 use serenity::GatewayIntents;
+use tokio::select;
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::Mutex;
 
 use crate::latex;
@@ -368,9 +370,12 @@ pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
     let framework = framework.build().await?;
     let shard_manager = framework.shard_manager().clone();
     tokio::spawn(async move {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Could not register ctrl+c handler");
+        let mut sigterm = signal(SignalKind::terminate()).unwrap();
+        let interrupt = tokio::signal::ctrl_c();
+        select! {
+            _ = sigterm.recv() => warn!("Received SIGTERM"),
+            _ = interrupt => warn!("Received SIGINT")
+        }
         shard_manager.lock().await.shutdown_all().await;
     });
 
