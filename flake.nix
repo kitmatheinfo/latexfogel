@@ -27,17 +27,27 @@
             name = "ghcr.io/kitmatheinfo/latexfogel";
             tag = latexfogel.version;
 
-            contents = [
+            contents = with pkgs; [
               latexfogel
-              pkgs.cacert # or reqwest is very unhappy
-              pkgs.fontconfig # or tectonic fails
-              pkgs.bash # or magick can not spawn `gs`
-              pkgs.imagemagick # to convert, imagemagick_light has no adapter
-              pkgs.ghostscript_headless # to convert
+              cacert # or reqwest is very unhappy
+              fontconfig # or tectonic fails
+              bash # or magick can not spawn `gs`
+              imagemagick # to convert, imagemagick_light has no adapter
+              ghostscript_headless # to convert
+              docker-client # to communicate with docker
+              (texlive.combine {
+                inherit (texlive)
+                  scheme-basic
+                  latexmk
+                  preview
+                  xcolor
+                  standalone
+                  ;
+              })
             ];
 
             config = {
-              Cmd = [ "/bin/latexfogel" ];
+              Entrypoint = [ "/bin/latexfogel" ];
               WorkingDir = "/";
               Env = [
                 "FONTCONFIG_FILE=${pkgs.fontconfig.out}/etc/fonts/fonts.conf"

@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::bail;
 use image::ImageFormat;
+use log::{info, trace};
 use poise::serenity_prelude::{
     AttachmentType, ButtonStyle, CreateActionRow, CreateButton, CreateComponents, Member, Message,
     MessageComponentInteraction, MessageId, ReactionType, User, UserId,
@@ -12,7 +13,6 @@ use poise::{serenity_prelude as serenity, Event};
 use poise::{CreateReply, PrefixFrameworkOptions};
 use serenity::GatewayIntents;
 use tokio::sync::Mutex;
-use tokio::task::spawn_blocking;
 
 use crate::latex;
 use crate::latex::ImageWidth;
@@ -25,6 +25,7 @@ pub struct BotContext {
     wolfram_alpha: WolframAlpha,
     tex_cache: Arc<Mutex<HashMap<MessageId, MessageId>>>,
     wider_cache: Arc<Mutex<HashMap<MessageId, WideCacheEntry>>>,
+    renderer_image: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -34,11 +35,12 @@ struct WideCacheEntry {
 }
 
 impl BotContext {
-    pub fn new(wolfram_alpha: WolframAlpha) -> Self {
+    pub fn new(wolfram_alpha: WolframAlpha, renderer_image: String) -> Self {
         Self {
             wolfram_alpha,
             tex_cache: Arc::new(Mutex::new(HashMap::new())),
             wider_cache: Arc::new(Mutex::new(HashMap::new())),
+            renderer_image,
         }
     }
 }
@@ -121,8 +123,13 @@ async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Erro
 
     ctx.defer().await?;
 
-    let latex = message.content.clone();
-    let image = spawn_blocking(move || latex::render_to_png(ImageWidth::Normal, &latex)).await?;
+    let image = latex::render_latex(
+        ctx.id(),
+        &ctx.data().renderer_image,
+        message.content.clone(),
+        ImageWidth::Normal,
+    )
+    .await;
 
     if let Err(error) = &image {
         let res = ctx
@@ -190,7 +197,7 @@ async fn update_tex_cache<'a>(
         ctx.data().tex_cache.lock().await.insert(message_id, msg.id);
         return Ok(msg.id);
     }
-    Err(anyhow!("Error replying to message when updating tex cache"))
+    bail!("Error replying to message when updating tex cache")
 }
 
 async fn handle_event<'a>(
@@ -201,6 +208,7 @@ async fn handle_event<'a>(
 ) -> Result<(), Error> {
     if let Event::InteractionCreate { interaction } = event {
         if let Some(cmd) = interaction.as_message_component() {
+            trace!("Got interaction from '{}' ({})", cmd.user.name, cmd.user.id);
             if let Some(member) = &cmd.member {
                 if cmd.data.custom_id.starts_with(DELETE_CUSTOM_ID) {
                     handle_delete_button_click(ctx, cmd, member).await?;
@@ -223,11 +231,18 @@ async fn handle_widen_button_click<'a>(
             return answer_action_not_allowed(ctx, cmd).await;
         }
 
+        info!("Expanding for '{}' ({})", cmd.user.name, cmd.user.id);
+
         cmd.defer(ctx).await?;
 
         // Should work as we re-use the LaTeX
-        let image =
-            spawn_blocking(move || latex::render_to_png(ImageWidth::Wide, &cache.latex)).await?;
+        let image = latex::render_latex(
+            cmd.id.0,
+            &data.renderer_image,
+            cache.latex,
+            ImageWidth::Wide,
+        )
+        .await;
 
         cmd.get_interaction_response(ctx)
             .await?
@@ -324,6 +339,26 @@ pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
                     add_delete_buttons(ctx.author().id, reply);
                 }
             }),
+            pre_command: |ctx| {
+                Box::pin(async move {
+                    info!(
+                        "Executing command {}... for '{}' ({})",
+                        ctx.command().name,
+                        ctx.author().name,
+                        ctx.author().id
+                    );
+                })
+            },
+            post_command: |ctx| {
+                Box::pin(async move {
+                    info!(
+                        "Executed command {} for '{}' ({})!",
+                        ctx.command().name,
+                        ctx.author().name,
+                        ctx.author().id
+                    );
+                })
+            },
             ..Default::default()
         })
         .token(std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN"))
