@@ -155,10 +155,10 @@ pub async fn render_latex(
 
     let error_bit = output.stdout[0];
     if error_bit == 1 {
-        bail!(
-            "{}",
-            String::from_utf8_lossy(&output.stdout.as_slice()[1..])
-        );
+        let stdout = String::from_utf8_lossy(&output.stdout.as_slice()[1..]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        info!("Render failed:\nStdout:\n{stdout}\nStderr:\n{stderr}");
+        bail!("{}", stdout);
     }
     let overflow_bit = output.stdout[1];
     let overrun_hbox = overflow_bit != 0;
