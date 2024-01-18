@@ -37,11 +37,12 @@
               docker-client # to communicate with docker
               (texlive.combine {
                 inherit (texlive)
-                  scheme-basic
+                  bussproofs
                   latexmk
                   preview
-                  xcolor
+                  scheme-basic
                   standalone
+                  xcolor
                   ;
               })
             ];
