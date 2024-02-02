@@ -1,4 +1,6 @@
+use anyhow::anyhow;
 use image::{DynamicImage, GenericImageView, Pixel, RgbImage};
+use log::trace;
 
 pub struct WolframAlpha {
     api_key: String,
@@ -26,6 +28,15 @@ impl WolframAlpha {
             .send()
             .await?;
 
+        trace!("Got response from wolfram alpha: {response:?}");
+
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "WolframAlpha returned an error: '{}'",
+                response.status()
+            ));
+        }
+
         Ok(WolframAlphaSimpleResult {
             img: response.bytes().await?.to_vec(),
         })
@@ -38,6 +49,15 @@ impl WolframAlpha {
             .query(&vec![("i", query), ("appid", &self.api_key)])
             .send()
             .await?;
+
+        trace!("Got response from wolfram alpha: {response:?}");
+
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "WolframAlpha returned an error: '{}'",
+                response.status()
+            ));
+        }
 
         Ok(String::from_utf8(response.bytes().await?.to_vec())?)
     }
