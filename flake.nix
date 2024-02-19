@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11";
 
     naersk.url = "github:nix-community/naersk";
     naersk.inputs.nixpkgs.follows = "nixpkgs";
@@ -37,12 +37,14 @@
               docker-client # to communicate with docker
               (texlive.combine {
                 inherit (texlive)
+                  babel-german
                   bussproofs
                   latexmk
                   preview
                   scheme-basic
                   standalone
                   xcolor
+                  xetex
                   ;
               })
             ];
