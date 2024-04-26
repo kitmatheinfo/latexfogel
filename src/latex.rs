@@ -56,6 +56,7 @@ async fn render_to_png(width: ImageWidth, input: &str) -> anyhow::Result<PngResu
         \usepackage{amsmath,amssymb}
         \usepackage{xcolor}
         \usepackage{bussproofs}
+        \usepackage{braket}
         \definecolor{discordbg}{HTML}{313338}
         \begin{document}
         \color{white}

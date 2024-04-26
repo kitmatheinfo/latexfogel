@@ -45,6 +45,7 @@
                   standalone
                   xcolor
                   xetex
+                  braket
                   ;
               })
             ];
