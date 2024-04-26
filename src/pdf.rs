@@ -63,7 +63,8 @@ pub fn pdf_to_png(pdf: Vec<u8>) -> anyhow::Result<Vec<u8>> {
         .output()?;
     if !out.status.success() {
         bail!(
-            "Error running pdf->png conversion:\nStdout:\n{}\nStderr:\n{}",
+            "Error running pdf->png conversion ({}):\nStdout:\n{}\nStderr:\n{}",
+            out.status,
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr),
         );
