@@ -53,11 +53,17 @@ async fn render_to_png(width: ImageWidth, input: &str) -> anyhow::Result<PngResu
     let latex = r"
         \documentclass[preview,border=2pt]{standalone}
         \usepackage[paperwidth={{width}},paperheight=21cm,top=0mm,bottom=0mm,left=0mm,right=0mm]{geometry}
+        \usepackage{fontspec}
         \usepackage{amsmath,amssymb}
         \usepackage{xcolor}
         \usepackage{bussproofs}
         \usepackage{braket}
+        \usepackage{unicode-math}
+
+        \setmathfont{Latin Modern Math}
+
         \definecolor{discordbg}{HTML}{313338}
+
         \begin{document}
         \color{white}
         \pagecolor{discordbg}

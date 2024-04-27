@@ -16,7 +16,7 @@ pub async fn render_pdf(latex: &str) -> anyhow::Result<PdfResult> {
         .current_dir(tempdir.path())
         .arg("-interaction=nonstopmode")
         .arg("-halt-on-error")
-        .arg("-pdf")
+        .arg("-xelatex")
         .arg(latex_path.to_str().unwrap())
         .output()
         .await?;

@@ -15,6 +15,23 @@
         let
           pkgs = import nixpkgs { inherit system; };
           naersk' = pkgs.callPackage naersk { };
+          texliveCombined = (pkgs.texlive.combine {
+            inherit (pkgs.texlive)
+              babel-german
+              bussproofs
+              unicode-math
+              fontspec
+              latexmk
+              preview
+              lm
+              lm-math
+              scheme-basic
+              standalone
+              xcolor
+              xetex
+              braket
+              ;
+          });
         in
         rec {
           latexfogel = naersk'.buildPackage
@@ -35,27 +52,15 @@
               imagemagick # to convert, imagemagick_light has no adapter
               ghostscript_headless # to convert
               docker-client # to communicate with docker
-              (texlive.combine {
-                inherit (texlive)
-                  babel-german
-                  bussproofs
-                  latexmk
-                  preview
-                  scheme-basic
-                  standalone
-                  xcolor
-                  xetex
-                  braket
-                  ;
-              })
+              texliveCombined
             ];
 
             config = {
               Entrypoint = [ "/bin/latexfogel" ];
               WorkingDir = "/";
               Env = [
-                "FONTCONFIG_FILE=${pkgs.fontconfig.out}/etc/fonts/fonts.conf"
-                "FONTCONFIG_PATH=${pkgs.fontconfig.out}/etc/fonts/"
+                "FONTCONFIG_FILE=${pkgs.makeFontsConf { fontDirectories = [ texliveCombined.fonts ]; }}"
+                "HOME=/tmp"
               ];
             };
           };
