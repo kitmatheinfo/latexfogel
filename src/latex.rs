@@ -200,8 +200,8 @@ async fn spawn_renderer_process(
 ) -> anyhow::Result<Child> {
     let mut child = tokio::process::Command::new("docker")
         .arg("run")
-        .arg("--pids-limit=3000")
-        .arg("--memory=200M")
+        .arg("--pids-limit=5000")
+        .arg("--memory=500M")
         .arg("--cpus=1")
         .arg("--interactive=true")
         .arg("--read-only")
