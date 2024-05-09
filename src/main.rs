@@ -25,12 +25,12 @@ struct Args {
 async fn main() {
     let args = Args::parse();
 
+    env_logger::init_from_env(env_logger::Env::default().filter_or("RUST_LOG", "latexfogel=info"));
+
     if !std::env::temp_dir().exists() {
         std::fs::create_dir_all(std::env::temp_dir()).unwrap();
         warn!("Created my temp dir: {:?}", std::env::temp_dir());
     }
-
-    env_logger::init_from_env(env_logger::Env::default().filter_or("RUST_LOG", "latexfogel=info"));
 
     match args.command {
         Command::Bot {
