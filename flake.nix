@@ -59,7 +59,7 @@
               Entrypoint = [ "/bin/latexfogel" ];
               WorkingDir = "/";
               Env = [
-                "FONTCONFIG_FILE=${pkgs.makeFontsConf { fontDirectories = [ texliveCombined.fonts ]; }}"
+                "FONTCONFIG_FILE=${pkgs.makeFontsConf { fontDirectories = [ texliveCombined.fonts pkgs.noto-fonts pkgs.noto-fonts-color-emoji ]; }}"
                 "HOME=/tmp"
               ];
             };
