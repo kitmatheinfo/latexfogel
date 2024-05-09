@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
 
-use anyhow::bail;
 use image::ImageFormat;
 use log::{info, trace, warn};
 use poise::serenity_prelude::{
@@ -22,25 +21,54 @@ use crate::{latex, ImageWidth};
 const DELETE_CUSTOM_ID: &str = "delete";
 const WIDEN_CUSTOM_ID: &str = "widen";
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct WidenInfo {
+    /// Owner of the original message.
+    owner: UserId,
+    /// LaTeX code used to generate the original response.
+    latex: String,
+}
+
 pub struct BotContext {
     wolfram_alpha: WolframAlpha,
-    tex_cache: Arc<Mutex<HashMap<MessageId, MessageId>>>,
-    wider_cache: Arc<Mutex<HashMap<MessageId, WideCacheEntry>>>,
+
+    /// Maps from message (with math) to our response (usually with image).
+    rendered_cache: Arc<Mutex<HashMap<MessageId, MessageId>>>,
+
+    /// Maps from our response (usually with image) to widening information.
+    /// This info is only present if the image can be widened.
+    widen_cache: Arc<Mutex<HashMap<MessageId, WidenInfo>>>,
+
     renderer_image: String,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct WideCacheEntry {
-    owner: UserId,
-    latex: String,
+impl BotContext {
+    async fn rendered_response_id(&self, message_id: MessageId) -> Option<MessageId> {
+        self.rendered_cache.lock().await.get(&message_id).copied()
+    }
+
+    async fn register_rendered_response_id(&self, message_id: MessageId, response_id: MessageId) {
+        self.rendered_cache
+            .lock()
+            .await
+            .insert(message_id, response_id);
+    }
+
+    async fn widen_info(&self, message_id: MessageId) -> Option<WidenInfo> {
+        self.widen_cache.lock().await.get(&message_id).cloned()
+    }
+
+    async fn register_widen_info(&self, message_id: MessageId, info: WidenInfo) {
+        self.widen_cache.lock().await.insert(message_id, info);
+    }
 }
 
 impl BotContext {
     pub fn new(wolfram_alpha: WolframAlpha, renderer_image: String) -> Self {
         Self {
             wolfram_alpha,
-            tex_cache: Arc::new(Mutex::new(HashMap::new())),
-            wider_cache: Arc::new(Mutex::new(HashMap::new())),
+            rendered_cache: Arc::new(Mutex::new(HashMap::new())),
+            widen_cache: Arc::new(Mutex::new(HashMap::new())),
             renderer_image,
         }
     }
@@ -66,6 +94,16 @@ fn button_delete(owner: UserId) -> CreateButton {
         .style(ButtonStyle::Danger)
         .emoji(ReactionType::Unicode("🗑️".to_string()))
         .custom_id(format!("{DELETE_CUSTOM_ID}{}", owner.0));
+    button
+}
+
+fn button_wider(owner: UserId) -> CreateButton {
+    let mut button = CreateButton::default();
+    button
+        .label("Expand")
+        .style(ButtonStyle::Primary)
+        .emoji(ReactionType::Unicode("↔️".to_string()))
+        .custom_id(format!("{WIDEN_CUSTOM_ID}{}", owner.0));
     button
 }
 
@@ -117,9 +155,12 @@ async fn wolfram(
 
 #[poise::command(context_menu_command = "Render LaTeX")]
 async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Error> {
-    if let Some(id) = ctx.data().tex_cache.lock().await.get(&message.id) {
+    if let Some(response_id) = ctx.data().rendered_response_id(message.id).await {
         // try to delete, if it is already gone that's fine too
-        let _ = ctx.http().delete_message(message.channel_id.0, id.0).await;
+        let _ = ctx
+            .http()
+            .delete_message(message.channel_id.0, response_id.0)
+            .await;
     }
 
     ctx.defer().await?;
@@ -132,22 +173,30 @@ async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Erro
     )
     .await;
 
-    if let Err(error) = &image {
-        let res = ctx
-            .send(|b| {
-                b.embed(|e| {
-                    e.title("Error rendering LaTeX")
-                        .title("You can edit your message and try again.")
-                        .description(error.to_string())
+    let image = match image {
+        Ok(image) => image,
+        Err(error) => {
+            let handle = ctx
+                .send(|b| {
+                    b.embed(|e| {
+                        e.title("Error rendering LaTeX")
+                            .title("You can edit your message and try again.")
+                            .description(error.to_string())
+                    })
                 })
-            })
-            .await?;
-        let _ = update_tex_cache(message.id, &res, ctx).await;
-        return Ok(());
-    }
-    let image = image.unwrap();
+                .await?;
 
-    let res = ctx
+            let response = handle.message().await?;
+
+            ctx.data()
+                .register_rendered_response_id(message.id, response.id)
+                .await;
+
+            return Ok(());
+        }
+    };
+
+    let handle = ctx
         .send(|b| {
             b.attachment(AttachmentType::Bytes {
                 data: image.png.into(),
@@ -162,50 +211,29 @@ async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Erro
             b
         })
         .await?;
-    let our_reply = update_tex_cache(message.id, &res, ctx).await;
+
+    let response = handle.message().await?;
+
+    ctx.data()
+        .register_rendered_response_id(message.id, response.id)
+        .await;
+
     if image.overrun_hbox {
-        if let Ok(msg_id) = our_reply {
-            let wide_cache_entry = WideCacheEntry {
-                owner: ctx.author().id,
-                latex: message.content,
-            };
-            ctx.data()
-                .wider_cache
-                .lock()
-                .await
-                .insert(msg_id, wide_cache_entry);
-        }
+        let info = WidenInfo {
+            owner: ctx.author().id,
+            latex: message.content,
+        };
+        ctx.data().register_widen_info(message.id, info).await;
     }
 
     Ok(())
-}
-fn button_wider(owner: UserId) -> CreateButton {
-    let mut button = CreateButton::default();
-    button
-        .label("Expand")
-        .style(ButtonStyle::Primary)
-        .emoji(ReactionType::Unicode("↔️".to_string()))
-        .custom_id(format!("{WIDEN_CUSTOM_ID}{}", owner.0));
-    button
-}
-
-async fn update_tex_cache<'a>(
-    message_id: MessageId,
-    reply_handle: &'a poise::ReplyHandle<'a>,
-    ctx: Context<'a>,
-) -> anyhow::Result<MessageId> {
-    if let Ok(msg) = reply_handle.message().await {
-        ctx.data().tex_cache.lock().await.insert(message_id, msg.id);
-        return Ok(msg.id);
-    }
-    bail!("Error replying to message when updating tex cache")
 }
 
 async fn handle_event<'a>(
     ctx: &'a serenity::Context,
     event: &'a Event<'a>,
     _framework: poise::FrameworkContext<'a, BotContext, Error>,
-    _data: &'a BotContext,
+    data: &'a BotContext,
 ) -> Result<(), Error> {
     if let Event::InteractionCreate { interaction } = event {
         if let Some(cmd) = interaction.as_message_component() {
@@ -214,7 +242,7 @@ async fn handle_event<'a>(
                 if cmd.data.custom_id.starts_with(DELETE_CUSTOM_ID) {
                     handle_delete_button_click(ctx, cmd, member).await?;
                 } else if cmd.data.custom_id.starts_with(WIDEN_CUSTOM_ID) {
-                    handle_widen_button_click(ctx, cmd, _data).await?;
+                    handle_widen_button_click(ctx, cmd, data).await?;
                 }
             }
         }
@@ -227,38 +255,36 @@ async fn handle_widen_button_click<'a>(
     cmd: &'a MessageComponentInteraction,
     data: &'a BotContext,
 ) -> Result<(), Error> {
-    if let Some(cache) = data.wider_cache.lock().await.get(&cmd.message.id).cloned() {
-        if cache.owner != cmd.user.id {
-            return answer_action_not_allowed(ctx, cmd).await;
-        }
-
-        info!("Expanding for '{}' ({})", cmd.user.name, cmd.user.id);
-
-        cmd.defer(ctx).await?;
-
-        // Should work as we re-use the LaTeX
-        let image = latex::render_latex(
-            cmd.id.0,
-            &data.renderer_image,
-            cache.latex,
-            ImageWidth::Wide,
-        )
-        .await;
-
-        cmd.get_interaction_response(ctx)
-            .await?
-            .edit(ctx, |b| {
-                b.components(|b| action_row_delete(cmd.user.id, b))
-                    .remove_all_attachments()
-                    .attachment(AttachmentType::Bytes {
-                        data: image.unwrap().png.into(),
-                        filename: "latex.png".to_string(),
-                    })
-            })
-            .await?;
-    } else {
+    let Some(info) = data.widen_info(cmd.message.id).await else {
         answer_unknown_button(ctx, cmd).await?;
+        return Ok(());
+    };
+
+    if info.owner != cmd.user.id {
+        return answer_action_not_allowed(ctx, cmd).await;
     }
+
+    info!("Expanding for '{}' ({})", cmd.user.name, cmd.user.id);
+
+    cmd.defer(ctx).await?;
+
+    // Should work as we re-use the LaTeX
+    let image = latex::render_latex(cmd.id.0, &data.renderer_image, info.latex, ImageWidth::Wide)
+        .await
+        .unwrap();
+
+    cmd.get_interaction_response(ctx)
+        .await?
+        .edit(ctx, |b| {
+            b.components(|b| action_row_delete(cmd.user.id, b))
+                .remove_all_attachments()
+                .attachment(AttachmentType::Bytes {
+                    data: image.png.into(),
+                    filename: "latex.png".to_string(),
+                })
+        })
+        .await?;
+
     Ok(())
 }
 
