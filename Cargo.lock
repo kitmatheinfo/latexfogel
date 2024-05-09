@@ -1456,6 +1456,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "typst",
+ "typst-assets",
  "typst-render",
 ]
 

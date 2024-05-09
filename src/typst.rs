@@ -41,30 +41,55 @@ impl FontSlot {
     }
 }
 
-fn load_system_fonts() -> (FontBook, Vec<FontSlot>) {
-    let mut book = FontBook::new();
-    let mut fonts = vec![];
+struct FontLoader {
+    book: FontBook,
+    fonts: Vec<FontSlot>,
+}
 
-    let mut db = fontdb::Database::new();
-    db.load_system_fonts();
-
-    for face in db.faces() {
-        let path = match &face.source {
-            fontdb::Source::File(path) | fontdb::Source::SharedFile(path, _) => path,
-            fontdb::Source::Binary(_) => continue,
-        };
-
-        if let Some(info) = db.with_face_data(face.id, FontInfo::new).unwrap() {
-            book.push(info);
-            fonts.push(FontSlot {
-                path: path.clone(),
-                index: face.index,
-                font: OnceLock::new(),
-            })
+impl FontLoader {
+    fn new() -> Self {
+        Self {
+            book: FontBook::new(),
+            fonts: vec![],
         }
     }
 
-    (book, fonts)
+    fn load_embedded_fonts(&mut self) {
+        // https://github.com/typst/typst/blob/be12762d942e978ddf2e0ac5c34125264ab483b7/crates/typst-cli/src/fonts.rs#L107-L121
+        for font_file in typst_assets::fonts() {
+            let font_data = Bytes::from_static(font_file);
+            for (i, font) in Font::iter(font_data).enumerate() {
+                self.book.push(font.info().clone());
+                self.fonts.push(FontSlot {
+                    path: PathBuf::new(),
+                    index: i as u32,
+                    font: OnceLock::from(Some(font)),
+                });
+            }
+        }
+    }
+
+    fn load_system_fonts(&mut self) {
+        // https://github.com/typst/typst/blob/be12762d942e978ddf2e0ac5c34125264ab483b7/crates/typst-cli/src/fonts.rs#L70-L100
+        let mut db = fontdb::Database::new();
+        db.load_system_fonts();
+
+        for face in db.faces() {
+            let path = match &face.source {
+                fontdb::Source::File(path) | fontdb::Source::SharedFile(path, _) => path,
+                fontdb::Source::Binary(_) => continue,
+            };
+
+            if let Some(info) = db.with_face_data(face.id, FontInfo::new).unwrap() {
+                self.book.push(info);
+                self.fonts.push(FontSlot {
+                    path: path.clone(),
+                    index: face.index,
+                    font: OnceLock::new(),
+                })
+            }
+        }
+    }
 }
 
 struct DummyWorld {
@@ -76,12 +101,15 @@ struct DummyWorld {
 
 impl DummyWorld {
     fn new(main: String) -> Self {
-        let (book, fonts) = load_system_fonts();
+        let mut loader = FontLoader::new();
+        loader.load_embedded_fonts();
+        loader.load_system_fonts();
+
         Self {
             library: Prehashed::new(Library::builder().build()),
-            book: Prehashed::new(book),
+            book: Prehashed::new(loader.book),
             main: Source::detached(main),
-            fonts,
+            fonts: loader.fonts,
         }
     }
 }
