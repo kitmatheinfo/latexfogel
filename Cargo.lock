@@ -1453,8 +1453,6 @@ dependencies = [
  "log",
  "poise",
  "reqwest",
- "serde",
- "serde_json",
  "tempfile",
  "tokio",
  "typst",
