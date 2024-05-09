@@ -9,38 +9,12 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Child;
 use tokio::time;
 
-use crate::pdf;
+use crate::{pdf, ImageWidth};
 
-pub enum ImageWidth {
-    Wide,
-    Normal,
-}
-
-impl ImageWidth {
-    fn width(&self) -> &'static str {
-        match self {
-            ImageWidth::Wide => "18cm",
-            ImageWidth::Normal => "11.5cm",
-        }
-    }
-
-    fn name(&self) -> &'static str {
-        match self {
-            ImageWidth::Wide => "wide",
-            ImageWidth::Normal => "normal",
-        }
-    }
-}
-
-impl TryFrom<&str> for ImageWidth {
-    type Error = ();
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value.trim() {
-            "wide" => Ok(Self::Wide),
-            "normal" => Ok(Self::Normal),
-            _ => Err(()),
-        }
+fn image_width_measure(width: ImageWidth) -> &'static str {
+    match width {
+        ImageWidth::Wide => "18cm",
+        ImageWidth::Normal => "11.5cm",
     }
 }
 
@@ -71,7 +45,7 @@ async fn render_to_png(width: ImageWidth, input: &str) -> anyhow::Result<PngResu
         \end{document}
     "
         .replace("{{input}}", input)
-        .replace("{{width}}", width.width());
+        .replace("{{width}}", image_width_measure(width) );
 
     let pdf_result = pdf::render_pdf(&latex).await?;
     Ok(PngResult {
@@ -80,18 +54,9 @@ async fn render_to_png(width: ImageWidth, input: &str) -> anyhow::Result<PngResu
     })
 }
 
-pub async fn run_renderer() {
+pub async fn run_renderer(width: ImageWidth) {
     info!("Pivoting to tmp dir: {:?}", std::env::temp_dir());
     std::env::set_current_dir(std::env::temp_dir()).expect("could not change to tempdir");
-
-    let mut width = String::new();
-    std::io::stdin()
-        .read_line(&mut width)
-        .expect("could not read width");
-
-    let width: ImageWidth = (*width)
-        .try_into()
-        .unwrap_or_else(|_| panic!("could not parse width: '{width}'"));
 
     let mut latex = String::new();
     std::io::stdin()
@@ -211,18 +176,13 @@ async fn spawn_renderer_process(
         .arg(format!("--name=slave-{context_id}"))
         .arg("--rm")
         .arg(renderer_image)
-        .arg("renderer")
+        .arg("render-latex")
+        .arg(width.arg_name())
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()?;
     // pass latex
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(format!("{}\n", width.name()).as_bytes())
-        .await?;
     child
         .stdin
         .as_mut()

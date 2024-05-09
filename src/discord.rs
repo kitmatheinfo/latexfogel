@@ -16,9 +16,8 @@ use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::Mutex;
 
-use crate::latex;
-use crate::latex::ImageWidth;
 use crate::wolframalpha::{WolframAlpha, WolframAlphaSimpleResult};
+use crate::{latex, ImageWidth};
 
 const DELETE_CUSTOM_ID: &str = "delete";
 const WIDEN_CUSTOM_ID: &str = "widen";

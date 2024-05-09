@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use log::warn;
 
 use crate::discord::BotContext;
@@ -9,10 +9,25 @@ mod latex;
 mod pdf;
 mod wolframalpha;
 
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ImageWidth {
+    Wide,
+    Normal,
+}
+
+impl ImageWidth {
+    pub fn arg_name(self) -> &'static str {
+        match self {
+            ImageWidth::Wide => "wide",
+            ImageWidth::Normal => "normal",
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Command {
     Bot { renderer_docker_image: String },
-    Renderer,
+    RenderLatex { width: ImageWidth },
 }
 
 #[derive(Parser)]
@@ -36,7 +51,7 @@ async fn main() {
         Command::Bot {
             renderer_docker_image,
         } => start_bot(renderer_docker_image).await,
-        Command::Renderer => latex::run_renderer().await,
+        Command::RenderLatex { width } => latex::run_renderer(width).await,
     }
 }
 
