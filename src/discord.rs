@@ -229,6 +229,66 @@ async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Erro
     Ok(())
 }
 
+#[poise::command(context_menu_command = "Render typst")]
+async fn typst_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Error> {
+    if let Some(response_id) = ctx.data().rendered_response_id(message.id).await {
+        // try to delete, if it is already gone that's fine too
+        let _ = ctx
+            .http()
+            .delete_message(message.channel_id.0, response_id.0)
+            .await;
+    }
+
+    ctx.defer().await?;
+
+    let image = crate::typst::render_typst(
+        ctx.id(),
+        ctx.data().renderer_image.clone(),
+        message.content.clone(),
+    )
+    .await;
+
+    let image = match image {
+        Ok(image) => image,
+        Err(error) => {
+            let handle = ctx
+                .send(|b| {
+                    b.embed(|e| {
+                        e.title("Error rendering typst")
+                            .title("You can edit your message and try again.")
+                            .description(error.to_string())
+                    })
+                })
+                .await?;
+
+            let response = handle.message().await?;
+
+            ctx.data()
+                .register_rendered_response_id(message.id, response.id)
+                .await;
+
+            return Ok(());
+        }
+    };
+
+    let handle = ctx
+        .send(|b| {
+            b.attachment(AttachmentType::Bytes {
+                data: image.png.into(),
+                filename: "typst.png".to_string(),
+            })
+        })
+        .await?;
+
+    let response = handle.message().await?;
+
+    ctx.data()
+        .register_rendered_response_id(message.id, response.id)
+        .await;
+
+    Ok(())
+}
+
 async fn handle_event<'a>(
     ctx: &'a serenity::Context,
     event: &'a Event<'a>,
@@ -355,7 +415,12 @@ fn interaction_unauthorized_message(user: &User) -> &'static str {
 pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![wolfram(), register(), tex_context_menu()],
+            commands: vec![
+                wolfram(),
+                register(),
+                tex_context_menu(),
+                typst_context_menu(),
+            ],
             prefix_options: PrefixFrameworkOptions {
                 edit_tracker: Some(poise::EditTracker::for_timespan(
                     std::time::Duration::from_secs(600),

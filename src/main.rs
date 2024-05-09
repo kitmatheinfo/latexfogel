@@ -8,6 +8,7 @@ mod discord;
 mod docker;
 mod latex;
 mod pdf;
+mod typst;
 mod wolframalpha;
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -29,6 +30,7 @@ impl ImageWidth {
 enum Command {
     Bot { renderer_docker_image: String },
     RenderLatex { width: ImageWidth },
+    RenderTypst,
 }
 
 #[derive(Parser)]
@@ -53,6 +55,7 @@ async fn main() {
             renderer_docker_image,
         } => start_bot(renderer_docker_image).await,
         Command::RenderLatex { width } => latex::run_renderer(width).await,
+        Command::RenderTypst => typst::run_renderer(),
     }
 }
 

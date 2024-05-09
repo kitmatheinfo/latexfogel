@@ -17,3 +17,7 @@ image = "0.24.7"
 env_logger = "0.10.0"
 log = "0.4.20"
 clap = { version = "4.5.4", features = ["derive", "deprecated"] }
+typst = "0.11.0"
+typst-render = "0.11.0"
+fontdb = "0.16.2"
+comemo = "0.4.0"
