@@ -1,14 +1,9 @@
 use std::io::{Read, Write};
-use std::process::Stdio;
-use std::time::Duration;
 
 use anyhow::bail;
 use log::{error, info};
-use time::timeout;
-use tokio::io::AsyncWriteExt;
-use tokio::process::Child;
-use tokio::time;
 
+use crate::docker::DockerCommand;
 use crate::{pdf, ImageWidth};
 
 fn image_width_measure(width: ImageWidth) -> &'static str {
@@ -18,12 +13,12 @@ fn image_width_measure(width: ImageWidth) -> &'static str {
     }
 }
 
-pub struct PngResult {
+pub struct RenderedLatex {
     pub png: Vec<u8>,
     pub overrun_hbox: bool,
 }
 
-async fn render_to_png(width: ImageWidth, input: &str) -> anyhow::Result<PngResult> {
+async fn render_to_png(width: ImageWidth, input: &str) -> anyhow::Result<RenderedLatex> {
     let latex = r"
         \documentclass[preview,border=2pt]{standalone}
         \usepackage[paperwidth={{width}},paperheight=21cm,top=0mm,bottom=0mm,left=0mm,right=0mm]{geometry}
@@ -48,7 +43,7 @@ async fn render_to_png(width: ImageWidth, input: &str) -> anyhow::Result<PngResu
         .replace("{{width}}", image_width_measure(width) );
 
     let pdf_result = pdf::render_pdf(&latex).await?;
-    Ok(PngResult {
+    Ok(RenderedLatex {
         png: pdf::pdf_to_png(pdf_result.pdf)?,
         overrun_hbox: pdf_result.overrun_hbox,
     })
@@ -86,35 +81,15 @@ pub async fn run_renderer(width: ImageWidth) {
 
 pub async fn render_latex(
     context_id: u64,
-    renderer_image: &str,
+    renderer_image: String,
     latex: String,
     width: ImageWidth,
-) -> anyhow::Result<PngResult> {
-    info!("Pulling image");
-    pull_renderer_image(renderer_image).await?;
-    info!("Pulled image");
-
-    let child = spawn_renderer_process(context_id, renderer_image, latex, width).await?;
-
-    let output = timeout(Duration::from_secs(15), child.wait_with_output()).await;
-    let output = match output {
-        Ok(out) => out?,
-        Err(_) => {
-            info!("Renderer {context_id} timed out, killing it");
-            kill_renderer_process(context_id).await?;
-            bail!("Timeout reached.");
-        }
-    };
-
-    if !output.status.success() {
-        error!(
-            "Renderer died with {}.\nStdout:{}\nStderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        bail!("Renderer exited with non-zero exit code {}", output.status);
-    }
+) -> anyhow::Result<RenderedLatex> {
+    let output = DockerCommand::new(renderer_image, format!("slave-latex-{context_id}"))
+        .arg("render-latex")
+        .arg(width.arg_name())
+        .run(&latex)
+        .await?;
 
     if output.stdout.len() < 3 {
         error!(
@@ -137,76 +112,5 @@ pub async fn render_latex(
     let overrun_hbox = overflow_bit != 0;
     let png = output.stdout.as_slice()[2..].to_vec();
 
-    Ok(PngResult { overrun_hbox, png })
-}
-
-async fn pull_renderer_image(renderer_image: &str) -> anyhow::Result<()> {
-    let child = tokio::process::Command::new("docker")
-        .arg("pull")
-        .arg(renderer_image)
-        .output()
-        .await?;
-
-    if !child.status.success() {
-        bail!(
-            "Could not pull renderer image.\nStdout:\n{}\nStderr:\n{}",
-            String::from_utf8_lossy(&child.stdout),
-            String::from_utf8_lossy(&child.stderr)
-        )
-    }
-    Ok(())
-}
-
-async fn spawn_renderer_process(
-    context_id: u64,
-    renderer_image: &str,
-    latex: String,
-    width: ImageWidth,
-) -> anyhow::Result<Child> {
-    let mut child = tokio::process::Command::new("docker")
-        .arg("run")
-        .arg("--pids-limit=5000")
-        .arg("--memory=500M")
-        .arg("--cpus=1")
-        .arg("--interactive=true")
-        .arg("--read-only")
-        .arg("--network=none")
-        .arg("--cap-drop=all")
-        .arg("--tmpfs=/tmp")
-        .arg(format!("--name=slave-{context_id}"))
-        .arg("--rm")
-        .arg(renderer_image)
-        .arg("render-latex")
-        .arg(width.arg_name())
-        .stdin(Stdio::piped())
-        .stderr(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()?;
-    // pass latex
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(latex.as_bytes())
-        .await?;
-    Ok(child)
-}
-
-async fn kill_renderer_process(context_id: u64) -> anyhow::Result<()> {
-    let output = tokio::process::Command::new("docker")
-        .arg("kill")
-        .arg(format!("slave-{context_id}"))
-        .output()
-        .await?;
-
-    if !output.status.success() {
-        error!(
-            "Failed to kill renderer: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-
-        bail!("could not kill renderer")
-    } else {
-        Ok(())
-    }
+    Ok(RenderedLatex { png, overrun_hbox })
 }

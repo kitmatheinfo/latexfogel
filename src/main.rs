@@ -5,6 +5,7 @@ use crate::discord::BotContext;
 use crate::wolframalpha::WolframAlpha;
 
 mod discord;
+mod docker;
 mod latex;
 mod pdf;
 mod wolframalpha;

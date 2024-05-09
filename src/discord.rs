@@ -167,7 +167,7 @@ async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Erro
 
     let image = latex::render_latex(
         ctx.id(),
-        &ctx.data().renderer_image,
+        ctx.data().renderer_image.clone(),
         message.content.clone(),
         ImageWidth::Normal,
     )
@@ -269,9 +269,14 @@ async fn handle_widen_button_click<'a>(
     cmd.defer(ctx).await?;
 
     // Should work as we re-use the LaTeX
-    let image = latex::render_latex(cmd.id.0, &data.renderer_image, info.latex, ImageWidth::Wide)
-        .await
-        .unwrap();
+    let image = latex::render_latex(
+        cmd.id.0,
+        data.renderer_image.clone(),
+        info.latex,
+        ImageWidth::Wide,
+    )
+    .await
+    .unwrap();
 
     cmd.get_interaction_response(ctx)
         .await?
