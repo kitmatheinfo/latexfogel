@@ -30,17 +30,9 @@ pub async fn render_pdf(latex: &str) -> anyhow::Result<PdfResult> {
         });
     }
 
-    if let Some(error_line) = stdout
-        .lines()
-        .find(|line| line.contains("Fatal error occurred"))
-    {
-        let prefix = error_line.split_once(' ').unwrap().0;
-
-        if let Some(error) = stdout.lines().find(|line| line.starts_with(prefix)) {
-            let error = error.strip_prefix(prefix).unwrap().trim();
-            bail!("**Invalid LaTeX**\n```\n{error}\n```")
-        }
-        bail!("**Your LaTeX code contains an unknown error**");
+    if let Some(error_line) = stdout.lines().find(|line| line.starts_with("! ")) {
+        let error = error_line.strip_prefix("! ").unwrap();
+        bail!("**Invalid LaTeX**\n```\n{error}\n```")
     }
 
     let stderr = String::from_utf8_lossy(&out.stderr);
