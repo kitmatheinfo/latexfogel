@@ -146,7 +146,8 @@ impl World for DummyWorld {
 
 pub fn render_to_png(typst: String) -> anyhow::Result<Vec<u8>> {
     let typst = [
-        "#set page(width: 11.5cm, height: auto, margin: 0.1cm, fill: rgb(\"#313338\"))",
+        "#set page(width: 11.5cm, height: auto, margin: (x: 1mm, y: 2mm))",
+        "#set page(fill: rgb(\"#313338\"))", // Discord background color
         "#set text(white)",
         &typst,
     ]
