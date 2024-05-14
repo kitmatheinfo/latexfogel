@@ -51,7 +51,12 @@ jobs:
           username: "${{ github.repository_owner }}"
           password: "${{ secrets.GITHUB_TOKEN }}"
 
+      - name: Build
+        if: github.event_name == 'pull_request'
+        run: nix build --ignore-environment --keep PATH --keep IMAGE_NAME
+
       - name: Build and publish docker image
+        if: github.event_name != 'pull_request'
         run: nix develop .#docker --ignore-environment --keep PATH --keep IMAGE_NAME --command publish "${{ steps.meta.outputs.tags }}"
         env:
           IMAGE_NAME: "${{ env.IMAGE_NAME }}"
