@@ -1,13 +1,12 @@
 use std::{
     fs,
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
     path::PathBuf,
     sync::OnceLock,
 };
 
 use anyhow::anyhow;
 use comemo::Prehashed;
-use include_dir::{include_dir, Dir};
 use typst::{
     diag::{FileError, FileResult},
     eval::Tracer,
@@ -20,9 +19,6 @@ use typst::{
 };
 
 use crate::docker::DockerCommand;
-
-/// If this makes your IDE crash too often, include an empty directory instead.
-const PACKAGES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/typst-packages/packages");
 
 // The logic for detecting and loading fonts was ripped straight from:
 // https://github.com/typst/typst/blob/69dcc89d84176838c293b2d59747cd65e28843ad/crates/typst-cli/src/fonts.rs
@@ -140,19 +136,23 @@ impl World for DummyWorld {
             return Err(FileError::AccessDenied);
         };
 
+        let mut path: PathBuf = std::env::var("TYPST_PACKAGES")
+            .map_err(|_| FileError::AccessDenied)?
+            .into();
+
         // Translate package spec to path in packages repo.
         // https://github.com/typst/packages/tree/main?tab=readme-ov-file#published-packages
-        let mut path = PathBuf::new();
         path.push(package.namespace.as_str());
         path.push(package.name.as_str());
         path.push(package.version.to_string());
         path.push(id.vpath().as_rootless_path());
 
-        let Some(file) = PACKAGES.get_file(&path) else {
-            return Err(FileError::NotFound(path));
-        };
+        let file = fs::read(&path).map_err(|e| match e.kind() {
+            ErrorKind::NotFound => FileError::NotFound(path),
+            _ => FileError::AccessDenied,
+        })?;
 
-        Ok(Bytes::from_static(file.contents()))
+        Ok(file.into())
     }
 
     fn font(&self, index: usize) -> Option<Font> {

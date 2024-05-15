@@ -12,9 +12,12 @@
 
     naersk.url = "github:nix-community/naersk";
     naersk.inputs.nixpkgs.follows = "nixpkgs";
+
+    typst-packages.url = "github:typst/packages";
+    typst-packages.flake = false;
   };
 
-  outputs = { self, nixpkgs, naersk }:
+  outputs = { self, nixpkgs, naersk, typst-packages }:
     let forAllSystems = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed;
     in rec {
       packages = forAllSystems (system:
@@ -62,6 +65,7 @@
               WorkingDir = "/";
               Env = [
                 "FONTCONFIG_FILE=${pkgs.makeFontsConf { fontDirectories = [ texliveCombined.fonts pkgs.noto-fonts pkgs.noto-fonts-color-emoji ]; }}"
+                "TYPST_PACKAGES=${typst-packages}/packages"
                 "HOME=/tmp"
               ];
             };
