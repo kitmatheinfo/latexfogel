@@ -37,7 +37,7 @@
           latexfogel = naersk'.buildPackage
             {
               root = ./.;
-              nativeBuildInputs = with pkgs; [ pkg-config openssl graphite2 icu freetype fontconfig ];
+              nativeBuildInputs = with pkgs; [ pkg-config graphite2 icu freetype fontconfig ];
             };
           default = latexfogel;
           docker = pkgs.dockerTools.buildLayeredImage {
