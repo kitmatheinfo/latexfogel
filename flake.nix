@@ -1,17 +1,26 @@
+# IMPORTANT:
+#
+# When using the flake as input, include `?submodules=1` at the end of the flake
+# URL. This also applies when building the flake, meaning you have to use the
+# following command:
+#
+# $ nix build '.?submodules=1'
+
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     naersk.url = "github:nix-community/naersk";
     naersk.inputs.nixpkgs.follows = "nixpkgs";
+
+    typst-packages.url = "github:typst/packages";
+    typst-packages.flake = false;
   };
 
-  outputs = { self, nixpkgs, naersk }:
+  outputs = { self, nixpkgs, naersk, typst-packages }:
     let forAllSystems = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed;
-    in
-    rec {
-      packages = flake-packages;
-      flake-packages = forAllSystems (system:
+    in rec {
+      packages = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
           naersk' = pkgs.callPackage naersk { };
@@ -34,11 +43,7 @@
           });
         in
         rec {
-          latexfogel = naersk'.buildPackage
-            {
-              root = ./.;
-              nativeBuildInputs = with pkgs; [ pkg-config openssl graphite2 icu freetype fontconfig ];
-            };
+          latexfogel = naersk'.buildPackage { src = ./.; };
           default = latexfogel;
           docker = pkgs.dockerTools.buildLayeredImage {
             name = "ghcr.io/kitmatheinfo/latexfogel";
@@ -60,6 +65,7 @@
               WorkingDir = "/";
               Env = [
                 "FONTCONFIG_FILE=${pkgs.makeFontsConf { fontDirectories = [ texliveCombined.fonts pkgs.noto-fonts pkgs.noto-fonts-color-emoji ]; }}"
+                "TYPST_PACKAGES=${typst-packages}/packages"
                 "HOME=/tmp"
               ];
             };
@@ -67,13 +73,11 @@
         }
       );
       devShells = forAllSystems (system:
-        let
-          pkgs = import nixpkgs { inherit system; };
-        in
-        rec {
+        let pkgs = import nixpkgs { inherit system; };
+        in rec {
           docker = pkgs.mkShell rec {
             publish = pkgs.writeScriptBin "publish" ''
-              chore/publish.sh "${flake-packages."${system}".docker}" "${flake-packages."${system}".docker.imageName}" "${flake-packages."${system}".docker.imageTag}" "$1"
+              chore/publish.sh "${packages."${system}".docker}" "${packages."${system}".docker.imageName}" "${packages."${system}".docker.imageTag}" "$1"
             '';
             packages = [ publish ];
           };

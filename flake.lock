@@ -39,7 +39,24 @@
     "root": {
       "inputs": {
         "naersk": "naersk",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "typst-packages": "typst-packages"
+      }
+    },
+    "typst-packages": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1715767920,
+        "narHash": "sha256-gvy1q4ul3hpiwc1Sa6ppXPGL69qYHRHriG5KKNDemQA=",
+        "owner": "typst",
+        "repo": "packages",
+        "rev": "d06d87c0c46d91ccdca6b9913a85021ad4bec90e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "typst",
+        "repo": "packages",
+        "type": "github"
       }
     }
   },
