@@ -8,10 +8,8 @@
 
   outputs = { self, nixpkgs, naersk }:
     let forAllSystems = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed;
-    in
-    rec {
-      packages = flake-packages;
-      flake-packages = forAllSystems (system:
+    in rec {
+      packages = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
           naersk' = pkgs.callPackage naersk { };
@@ -34,11 +32,7 @@
           });
         in
         rec {
-          latexfogel = naersk'.buildPackage
-            {
-              root = ./.;
-              nativeBuildInputs = with pkgs; [ pkg-config graphite2 icu freetype fontconfig ];
-            };
+          latexfogel = naersk'.buildPackage { src = ./.; };
           default = latexfogel;
           docker = pkgs.dockerTools.buildLayeredImage {
             name = "ghcr.io/kitmatheinfo/latexfogel";
@@ -67,13 +61,11 @@
         }
       );
       devShells = forAllSystems (system:
-        let
-          pkgs = import nixpkgs { inherit system; };
-        in
-        rec {
+        let pkgs = import nixpkgs { inherit system; };
+        in rec {
           docker = pkgs.mkShell rec {
             publish = pkgs.writeScriptBin "publish" ''
-              chore/publish.sh "${flake-packages."${system}".docker}" "${flake-packages."${system}".docker.imageName}" "${flake-packages."${system}".docker.imageTag}" "$1"
+              chore/publish.sh "${packages."${system}".docker}" "${packages."${system}".docker.imageName}" "${packages."${system}".docker.imageTag}" "$1"
             '';
             packages = [ publish ];
           };
