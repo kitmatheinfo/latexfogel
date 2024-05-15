@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::anyhow;
 use comemo::Prehashed;
+use include_dir::{include_dir, Dir};
 use typst::{
     diag::{FileError, FileResult},
     eval::Tracer,
@@ -19,6 +20,9 @@ use typst::{
 };
 
 use crate::docker::DockerCommand;
+
+/// If this makes your IDE crash too often, include an empty directory instead.
+const PACKAGES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/typst-packages/packages");
 
 // The logic for detecting and loading fonts was ripped straight from:
 // https://github.com/typst/typst/blob/69dcc89d84176838c293b2d59747cd65e28843ad/crates/typst-cli/src/fonts.rs
@@ -131,8 +135,24 @@ impl World for DummyWorld {
         Err(FileError::AccessDenied)
     }
 
-    fn file(&self, _id: FileId) -> FileResult<Bytes> {
-        Err(FileError::AccessDenied)
+    fn file(&self, id: FileId) -> FileResult<Bytes> {
+        let Some(package) = id.package() else {
+            return Err(FileError::AccessDenied);
+        };
+
+        // Translate package spec to path in packages repo.
+        // https://github.com/typst/packages/tree/main?tab=readme-ov-file#published-packages
+        let mut path = PathBuf::new();
+        path.push(package.namespace.as_str());
+        path.push(package.name.as_str());
+        path.push(package.version.to_string());
+        path.push(id.vpath().as_rootless_path());
+
+        let Some(file) = PACKAGES.get_file(&path) else {
+            return Err(FileError::NotFound(path));
+        };
+
+        Ok(Bytes::from_static(file.contents()))
     }
 
     fn font(&self, index: usize) -> Option<Font> {

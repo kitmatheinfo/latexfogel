@@ -1,3 +1,11 @@
+# IMPORTANT:
+#
+# When using the flake as input, include `?submodules=1` at the end of the flake
+# URL. This also applies when building the flake, meaning you have to use the
+# following command:
+#
+# $ nix build '.?submodules=1'
+
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
