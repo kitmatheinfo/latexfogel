@@ -53,7 +53,7 @@ jobs:
 
       - name: Build
         if: github.event_name == 'pull_request'
-        run: nix build --ignore-environment --keep PATH --keep IMAGE_NAME
+        run: nix build .#docker
 
       - name: Build and publish docker image
         if: github.event_name != 'pull_request'
