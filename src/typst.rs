@@ -114,6 +114,32 @@ impl DummyWorld {
     }
 }
 
+fn load_package_file(id: FileId) -> FileResult<Bytes> {
+    let Some(package) = id.package() else {
+        return Err(FileError::Other(Some(
+            "only packages can be imported".into(),
+        )));
+    };
+
+    let mut path: PathBuf = std::env::var("TYPST_PACKAGES")
+        .map_err(|_| FileError::Other(Some("can't find my packages D:".into())))?
+        .into();
+
+    // Translate package spec to path in packages repo.
+    // https://github.com/typst/packages/tree/main?tab=readme-ov-file#published-packages
+    path.push(package.namespace.as_str());
+    path.push(package.name.as_str());
+    path.push(package.version.to_string());
+    path.push(id.vpath().as_rootless_path());
+
+    let file = fs::read(&path).map_err(|e| match e.kind() {
+        ErrorKind::NotFound => FileError::NotFound(path),
+        _ => FileError::AccessDenied,
+    })?;
+
+    Ok(file.into())
+}
+
 impl World for DummyWorld {
     fn library(&self) -> &Prehashed<Library> {
         &self.library
@@ -127,34 +153,14 @@ impl World for DummyWorld {
         self.main.clone()
     }
 
-    fn source(&self, _id: FileId) -> FileResult<Source> {
-        Err(FileError::AccessDenied)
+    fn source(&self, id: FileId) -> FileResult<Source> {
+        let bytes = load_package_file(id)?;
+        let text = String::from_utf8(bytes.to_vec())?;
+        Ok(Source::new(id, text))
     }
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
-        let Some(package) = id.package() else {
-            return Err(FileError::Other(Some(
-                "only packages can be imported".into(),
-            )));
-        };
-
-        let mut path: PathBuf = std::env::var("TYPST_PACKAGES")
-            .map_err(|_| FileError::Other(Some("can't find my packages D:".into())))?
-            .into();
-
-        // Translate package spec to path in packages repo.
-        // https://github.com/typst/packages/tree/main?tab=readme-ov-file#published-packages
-        path.push(package.namespace.as_str());
-        path.push(package.name.as_str());
-        path.push(package.version.to_string());
-        path.push(id.vpath().as_rootless_path());
-
-        let file = fs::read(&path).map_err(|e| match e.kind() {
-            ErrorKind::NotFound => FileError::NotFound(path),
-            _ => FileError::AccessDenied,
-        })?;
-
-        Ok(file.into())
+        load_package_file(id)
     }
 
     fn font(&self, index: usize) -> Option<Font> {
