@@ -133,11 +133,13 @@ impl World for DummyWorld {
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
         let Some(package) = id.package() else {
-            return Err(FileError::AccessDenied);
+            return Err(FileError::Other(Some(
+                "only packages can be imported".into(),
+            )));
         };
 
         let mut path: PathBuf = std::env::var("TYPST_PACKAGES")
-            .map_err(|_| FileError::AccessDenied)?
+            .map_err(|_| FileError::Other(Some("can't find my packages D:".into())))?
             .into();
 
         // Translate package spec to path in packages repo.
