@@ -20,7 +20,10 @@
   outputs = { self, nixpkgs, naersk, typst-packages }:
     let forAllSystems = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed;
     in rec {
-      packages = forAllSystems (system:
+      packages = exported-packages;
+      # We need a unique name for this that does not clash with anything in the
+      # devShells declaration
+      exported-packages = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
           naersk' = pkgs.callPackage naersk { };
@@ -73,11 +76,13 @@
         }
       );
       devShells = forAllSystems (system:
-        let pkgs = import nixpkgs { inherit system; };
+        let
+          pkgs = import nixpkgs { inherit system; };
+          docker-image = exported-packages."${system}".docker;
         in rec {
           docker = pkgs.mkShell rec {
             publish = pkgs.writeScriptBin "publish" ''
-              chore/publish.sh "${packages."${system}".docker}" "${packages."${system}".docker.imageName}" "${packages."${system}".docker.imageTag}" "$1"
+              chore/publish.sh "${docker-image}" "${docker-image.imageName}" "${docker-image.imageTag}" "$1"
             '';
             packages = [ publish ];
           };
