@@ -4,18 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.75"
-clap = { version = "4.5.4", features = ["derive", "deprecated"] }
-env_logger = "0.10.0"
-fontdb = "0.16.2"
-image = "0.24.7"
-log = "0.4.20"
+anyhow = "1.0.91"
+clap = { version = "4.5.20", features = ["derive", "deprecated"] }
+env_logger = "0.11.5"
+fontdb = "0.23.0"
+image = "0.25.4"
+log = "0.4.22"
 poise = "0.6.1"
-reqwest = { version = "0.11.20", default-features = false, features = [
+reqwest = { version = "0.12.9", default-features = false, features = [
     "rustls-tls-native-roots",
 ] }
-tempfile = "3.8.0"
-tokio = { version = "1.32.0", features = ["full"] }
+tempfile = "3.13.0"
+tokio = { version = "1.41.0", features = ["full"] }
 typst = "0.12.0"
 typst-assets = { version = "0.12.0", features = ["fonts"] }
 typst-render = "0.12.0"
