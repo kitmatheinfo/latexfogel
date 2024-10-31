@@ -1,16 +1,17 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
+use std::time::Duration;
 
 use image::ImageFormat;
 use log::{info, trace, warn};
 use poise::serenity_prelude::{
-    AttachmentType, ButtonStyle, CreateActionRow, CreateButton, CreateComponents, Member, Message,
-    MessageComponentInteraction, MessageId, ReactionType, User, UserId,
+    self as serenity, ButtonStyle, ComponentInteraction, CreateActionRow, CreateAttachment,
+    CreateButton, CreateEmbed, CreateInteractionResponse, CreateInteractionResponseMessage,
+    EditAttachments, EditMessage, FullEvent, GatewayIntents, Member, Message, MessageId,
+    ReactionType, User, UserId,
 };
-use poise::{serenity_prelude as serenity, Event};
-use poise::{CreateReply, PrefixFrameworkOptions};
-use serenity::GatewayIntents;
+use poise::{CreateReply, EditTracker, PrefixFrameworkOptions};
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::Mutex;
@@ -77,34 +78,18 @@ impl BotContext {
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, BotContext, Error>;
 
-fn add_delete_buttons(owner: UserId, builder: &mut CreateReply) {
-    builder.components(|b| action_row_delete(owner, b));
-}
-
-fn action_row_delete(owner: UserId, b: &mut CreateComponents) -> &mut CreateComponents {
-    let mut action_row = CreateActionRow::default();
-    action_row.add_button(button_delete(owner));
-    b.add_action_row(action_row)
-}
-
 fn button_delete(owner: UserId) -> CreateButton {
-    let mut button = CreateButton::default();
-    button
+    CreateButton::new(format!("{DELETE_CUSTOM_ID}{}", owner.get()))
         .label("Delete")
         .style(ButtonStyle::Danger)
         .emoji(ReactionType::Unicode("🗑️".to_string()))
-        .custom_id(format!("{DELETE_CUSTOM_ID}{}", owner.0));
-    button
 }
 
 fn button_wider(owner: UserId) -> CreateButton {
-    let mut button = CreateButton::default();
-    button
+    CreateButton::new(format!("{WIDEN_CUSTOM_ID}{}", owner.get()))
         .label("Expand")
         .style(ButtonStyle::Primary)
         .emoji(ReactionType::Unicode("↔️".to_string()))
-        .custom_id(format!("{WIDEN_CUSTOM_ID}{}", owner.0));
-    button
 }
 
 #[poise::command(prefix_command)]
@@ -126,27 +111,30 @@ async fn wolfram(
     if full_response.unwrap_or(false) || ctx.invoked_command_name() == "wa" {
         let result = ctx.data().wolfram_alpha.simple_query(&query).await?;
         let images = WolframAlphaSimpleResult::group_images(result.slice_image()?, 400);
-        ctx.send(|b| {
+        ctx.send({
+            let mut reply = CreateReply::default().reply(true);
+
             // Max is 10 but be nice
-            images.iter().take(6).enumerate().for_each(|(index, img)| {
+            for (idx, img) in images.iter().take(6).enumerate() {
                 let mut buffer = Vec::new();
                 img.write_to(&mut Cursor::new(&mut buffer), ImageFormat::Png)
                     .expect("write to buffer succeeds");
 
-                b.attachment(AttachmentType::Bytes {
-                    data: buffer.into(),
-                    filename: format!("wa{index}.png"),
-                });
-            });
-            b.reply(true)
+                reply = reply.attachment(CreateAttachment::bytes(buffer, format!("wa{idx}.png")));
+            }
+
+            reply
         })
         .await?
     } else {
         let result = ctx.data().wolfram_alpha.short_answer(&query).await?;
-        ctx.send(|b| {
-            b.reply(true)
-                .embed(|e| e.title("Wolfram Alpha's result").description(result))
-        })
+        ctx.send(
+            CreateReply::default().reply(true).embed(
+                CreateEmbed::default()
+                    .title("Wolfram Alpha's result")
+                    .description(result),
+            ),
+        )
         .await?
     };
 
@@ -159,7 +147,7 @@ async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Erro
         // try to delete, if it is already gone that's fine too
         let _ = ctx
             .http()
-            .delete_message(message.channel_id.0, response_id.0)
+            .delete_message(message.channel_id, response_id, None)
             .await;
     }
 
@@ -177,13 +165,14 @@ async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Erro
         Ok(image) => image,
         Err(error) => {
             let handle = ctx
-                .send(|b| {
-                    b.embed(|e| {
-                        e.title("Error rendering LaTeX")
+                .send(
+                    CreateReply::default().embed(
+                        CreateEmbed::default()
+                            .title("Error rendering LaTeX")
                             .title("You can edit your message and try again.")
-                            .description(error.to_string())
-                    })
-                })
+                            .description(error.to_string()),
+                    ),
+                )
                 .await?;
 
             let response = handle.message().await?;
@@ -197,18 +186,18 @@ async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Erro
     };
 
     let handle = ctx
-        .send(|b| {
-            b.attachment(AttachmentType::Bytes {
-                data: image.png.into(),
-                filename: "latex.png".to_string(),
-            });
+        .send({
+            let mut reply =
+                CreateReply::default().attachment(CreateAttachment::bytes(image.png, "latex.png"));
+
             if image.overrun_hbox {
-                let mut action_row = CreateActionRow::default();
-                action_row.add_button(button_delete(ctx.author().id));
-                action_row.add_button(button_wider(ctx.author().id));
-                b.components(|b| b.add_action_row(action_row));
+                reply = reply.components(vec![CreateActionRow::Buttons(vec![
+                    button_delete(ctx.author().id),
+                    button_wider(ctx.author().id),
+                ])]);
             }
-            b
+
+            reply
         })
         .await?;
 
@@ -235,7 +224,7 @@ async fn typst_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Er
         // try to delete, if it is already gone that's fine too
         let _ = ctx
             .http()
-            .delete_message(message.channel_id.0, response_id.0)
+            .delete_message(message.channel_id, response_id, None)
             .await;
     }
 
@@ -252,13 +241,14 @@ async fn typst_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Er
         Ok(image) => image,
         Err(error) => {
             let handle = ctx
-                .send(|b| {
-                    b.embed(|e| {
-                        e.title("Error rendering typst")
+                .send(
+                    CreateReply::default().embed(
+                        CreateEmbed::default()
+                            .title("Error rendering typst")
                             .title("You can edit your message and try again.")
-                            .description(error.to_string())
-                    })
-                })
+                            .description(error.to_string()),
+                    ),
+                )
                 .await?;
 
             let response = handle.message().await?;
@@ -272,12 +262,7 @@ async fn typst_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Er
     };
 
     let handle = ctx
-        .send(|b| {
-            b.attachment(AttachmentType::Bytes {
-                data: image.png.into(),
-                filename: "typst.png".to_string(),
-            })
-        })
+        .send(CreateReply::default().attachment(CreateAttachment::bytes(image.png, "typst.png")))
         .await?;
 
     let response = handle.message().await?;
@@ -291,11 +276,11 @@ async fn typst_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Er
 
 async fn handle_event<'a>(
     ctx: &'a serenity::Context,
-    event: &'a Event<'a>,
+    event: &'a FullEvent,
     _framework: poise::FrameworkContext<'a, BotContext, Error>,
     data: &'a BotContext,
 ) -> Result<(), Error> {
-    if let Event::InteractionCreate { interaction } = event {
+    if let FullEvent::InteractionCreate { interaction } = event {
         if let Some(cmd) = interaction.as_message_component() {
             trace!("Got interaction from '{}' ({})", cmd.user.name, cmd.user.id);
             if let Some(member) = &cmd.member {
@@ -312,7 +297,7 @@ async fn handle_event<'a>(
 
 async fn handle_widen_button_click<'a>(
     ctx: &'a serenity::Context,
-    cmd: &'a MessageComponentInteraction,
+    cmd: &'a ComponentInteraction,
     data: &'a BotContext,
 ) -> Result<(), Error> {
     let Some(info) = data.widen_info(cmd.message.id).await else {
@@ -330,7 +315,7 @@ async fn handle_widen_button_click<'a>(
 
     // Should work as we re-use the LaTeX
     let image = latex::render_latex(
-        cmd.id.0,
+        cmd.id.get(),
         data.renderer_image.clone(),
         info.latex,
         ImageWidth::Wide,
@@ -338,16 +323,19 @@ async fn handle_widen_button_click<'a>(
     .await
     .unwrap();
 
-    cmd.get_interaction_response(ctx)
+    cmd.get_response(ctx)
         .await?
-        .edit(ctx, |b| {
-            b.components(|b| action_row_delete(cmd.user.id, b))
-                .remove_all_attachments()
-                .attachment(AttachmentType::Bytes {
-                    data: image.png.into(),
-                    filename: "latex.png".to_string(),
-                })
-        })
+        .edit(
+            ctx,
+            EditMessage::default()
+                .components(vec![CreateActionRow::Buttons(vec![button_delete(
+                    cmd.user.id,
+                )])])
+                .attachments(
+                    // Since we don't use EditAttachments::keep_all, all previous attachments are deleted.
+                    EditAttachments::default().add(CreateAttachment::bytes(image.png, "latex.png")),
+                ),
+        )
         .await?;
 
     Ok(())
@@ -355,14 +343,20 @@ async fn handle_widen_button_click<'a>(
 
 async fn answer_unknown_button<'a>(
     ctx: &'a serenity::Context,
-    cmd: &'a MessageComponentInteraction,
+    cmd: &'a ComponentInteraction,
 ) -> Result<(), Error> {
-    cmd.create_interaction_response(ctx, |b| {
-        b.interaction_response_data(|b| {
-            b.ephemeral(true)
-                .embed(|e| e.title("I don't remember that button. Was it before a restart?"))
-        })
-    })
+    cmd.create_response(
+        ctx,
+        // Maybe use Modal instead?
+        CreateInteractionResponse::Message(
+            CreateInteractionResponseMessage::default()
+                .ephemeral(true)
+                .embed(
+                    CreateEmbed::default()
+                        .title("I don't remember that button. Was it before a restart?"),
+                ),
+        ),
+    )
     .await?;
 
     Ok(())
@@ -370,7 +364,7 @@ async fn answer_unknown_button<'a>(
 
 async fn handle_delete_button_click<'a>(
     ctx: &'a serenity::Context,
-    cmd: &'a MessageComponentInteraction,
+    cmd: &'a ComponentInteraction,
     member: &'a Member,
 ) -> Result<(), Error> {
     let author_id: u64 = cmd
@@ -380,7 +374,7 @@ async fn handle_delete_button_click<'a>(
         .unwrap()
         .parse()
         .unwrap();
-    if author_id == member.user.id.0 {
+    if author_id == member.user.id.get() {
         cmd.message.delete(ctx).await?;
     } else {
         answer_action_not_allowed(ctx, cmd).await?;
@@ -390,22 +384,28 @@ async fn handle_delete_button_click<'a>(
 
 async fn answer_action_not_allowed<'a>(
     ctx: &'a serenity::Context,
-    cmd: &'a MessageComponentInteraction,
+    cmd: &'a ComponentInteraction,
 ) -> Result<(), Error> {
-    cmd.create_interaction_response(ctx, |b| {
-        b.interaction_response_data(|b| {
-            b.ephemeral(true).embed(|e| {
-                e.title("You clicked a button.")
-                    .description(interaction_unauthorized_message(&cmd.user))
-            })
-        })
-    })
+    cmd.create_response(
+        ctx,
+        // Maybe use Modal instead?
+        CreateInteractionResponse::Message(
+            CreateInteractionResponseMessage::default()
+                .ephemeral(true)
+                .embed(
+                    CreateEmbed::default()
+                        .title("You clicked a button.")
+                        .description(interaction_unauthorized_message(&cmd.user)),
+                ),
+        ),
+    )
     .await?;
+
     Ok(())
 }
 
 fn interaction_unauthorized_message(user: &User) -> &'static str {
-    if user.id.0 == 140579104222085121 {
+    if user.id.get() == 140579104222085121 {
         "Bad bean, this isn't yours to click!"
     } else {
         "Good job. But this output was not generated for you, you cannot modify it."
@@ -413,6 +413,9 @@ fn interaction_unauthorized_message(user: &User) -> &'static str {
 }
 
 pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
+    let token = std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
+    let intents = GatewayIntents::non_privileged();
+
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
             commands: vec![
@@ -422,9 +425,9 @@ pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
                 typst_context_menu(),
             ],
             prefix_options: PrefixFrameworkOptions {
-                edit_tracker: Some(poise::EditTracker::for_timespan(
-                    std::time::Duration::from_secs(600),
-                )),
+                edit_tracker: Some(Arc::new(EditTracker::for_timespan(Duration::from_secs(
+                    600,
+                )))),
                 case_insensitive_commands: true,
                 ..Default::default()
             },
@@ -433,7 +436,11 @@ pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
             },
             reply_callback: Some(|ctx, reply| {
                 if reply.components.is_none() {
-                    add_delete_buttons(ctx.author().id, reply);
+                    reply.components(vec![CreateActionRow::Buttons(vec![button_delete(
+                        ctx.author().id,
+                    )])])
+                } else {
+                    reply
                 }
             }),
             pre_command: |ctx| {
@@ -458,12 +465,14 @@ pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
             },
             ..Default::default()
         })
-        .token(std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN"))
-        .intents(GatewayIntents::non_privileged())
-        .setup(|_ctx, _ready, _framework| Box::pin(async move { Ok(bot_context) }));
+        .setup(|_ctx, _ready, _framework| Box::pin(async move { Ok(bot_context) }))
+        .build();
 
-    let framework = framework.build().await?;
-    let shard_manager = framework.shard_manager().clone();
+    let mut client = serenity::ClientBuilder::new(token, intents)
+        .framework(framework)
+        .await?;
+
+    let shard_manager = client.shard_manager.clone();
     tokio::spawn(async move {
         let mut sigterm = signal(SignalKind::terminate()).unwrap();
         let interrupt = tokio::signal::ctrl_c();
@@ -471,8 +480,8 @@ pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
             _ = sigterm.recv() => warn!("Received SIGTERM"),
             _ = interrupt => warn!("Received SIGINT")
         }
-        shard_manager.lock().await.shutdown_all().await;
+        shard_manager.shutdown_all().await;
     });
 
-    Ok(framework.start().await?)
+    Ok(client.start().await?)
 }
