@@ -6,15 +6,13 @@ use std::{
 };
 
 use anyhow::anyhow;
-use comemo::Prehashed;
 use typst::{
     diag::{FileError, FileResult},
-    eval::Tracer,
     foundations::{Bytes, Datetime},
     layout::Abs,
     syntax::{FileId, Source},
     text::{Font, FontBook, FontInfo},
-    visualize::Color,
+    utils::LazyHash,
     Library, World,
 };
 
@@ -93,8 +91,8 @@ impl FontLoader {
 }
 
 struct DummyWorld {
-    library: Prehashed<Library>,
-    book: Prehashed<FontBook>,
+    library: LazyHash<Library>,
+    book: LazyHash<FontBook>,
     main: Source,
     fonts: Vec<FontSlot>,
 }
@@ -106,8 +104,8 @@ impl DummyWorld {
         loader.load_system_fonts();
 
         Self {
-            library: Prehashed::new(Library::builder().build()),
-            book: Prehashed::new(loader.book),
+            library: LazyHash::new(Library::builder().build()),
+            book: LazyHash::new(loader.book),
             main: Source::detached(main),
             fonts: loader.fonts,
         }
@@ -141,19 +139,23 @@ fn load_package_file(id: FileId) -> FileResult<Bytes> {
 }
 
 impl World for DummyWorld {
-    fn library(&self) -> &Prehashed<Library> {
+    fn library(&self) -> &LazyHash<Library> {
         &self.library
     }
 
-    fn book(&self) -> &Prehashed<FontBook> {
+    fn book(&self) -> &LazyHash<FontBook> {
         &self.book
     }
 
-    fn main(&self) -> Source {
-        self.main.clone()
+    fn main(&self) -> FileId {
+        self.main.id()
     }
 
     fn source(&self, id: FileId) -> FileResult<Source> {
+        if id == self.main.id() {
+            return Ok(self.main.clone());
+        }
+
         let bytes = load_package_file(id)?;
         let text = String::from_utf8(bytes.to_vec())?;
         Ok(Source::new(id, text))
@@ -182,9 +184,8 @@ pub fn render_to_png(typst: String) -> anyhow::Result<Vec<u8>> {
     .join("\n");
 
     let world = DummyWorld::new(typst);
-    let mut tracer = Tracer::new();
 
-    let document = typst::compile(&world, &mut tracer).map_err(|errs| {
+    let document = typst::compile(&world).output.map_err(|errs| {
         // Errors could be nicer, e.g.
         // https://github.com/typst/typst/blob/be12762d942e978ddf2e0ac5c34125264ab483b7/crates/typst-cli/src/compile.rs#L461-L501
         let errs = errs
@@ -196,8 +197,7 @@ pub fn render_to_png(typst: String) -> anyhow::Result<Vec<u8>> {
     })?;
 
     // Color doesn't matter, it is already set by the document itself
-    let png = typst_render::render_merged(&document, 4.0, Color::WHITE, Abs::zero(), Color::WHITE)
-        .encode_png()?;
+    let png = typst_render::render_merged(&document, 4.0, Abs::zero(), None).encode_png()?;
 
     Ok(png)
 }
