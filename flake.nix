@@ -53,7 +53,6 @@
             tag = latexfogel.version;
 
             contents = with pkgs; [
-              latexfogel
               cacert # or reqwest is very unhappy
               fontconfig # or tectonic fails
               bash # or magick can not spawn `gs`
@@ -64,7 +63,7 @@
             ];
 
             config = {
-              Entrypoint = [ "/bin/latexfogel" ];
+              Entrypoint = [ "${latexfogel}/bin/latexfogel" ];
               WorkingDir = "/";
               Env = [
                 "FONTCONFIG_FILE=${pkgs.makeFontsConf { fontDirectories = [ texliveCombined.fonts pkgs.noto-fonts pkgs.noto-fonts-color-emoji ]; }}"
@@ -79,7 +78,7 @@
         let
           pkgs = import nixpkgs { inherit system; };
           docker-image = exported-packages."${system}".docker;
-        in rec {
+        in {
           docker = pkgs.mkShell rec {
             publish = pkgs.writeScriptBin "publish" ''
               chore/publish.sh "${docker-image}" "${docker-image.imageName}" "${docker-image.imageTag}" "$1"
