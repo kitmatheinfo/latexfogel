@@ -177,6 +177,7 @@ impl World for DummyWorld {
 pub fn render_to_png(typst: String) -> anyhow::Result<Vec<u8>> {
     let typst = [
         "#set page(width: 11.5cm, height: auto, margin: (x: 1mm, y: 2mm))",
+        "#set page(fill: rgb(\"#313338\"))", // Discord background color
         "#set text(white)",
         &typst,
     ]
@@ -195,7 +196,7 @@ pub fn render_to_png(typst: String) -> anyhow::Result<Vec<u8>> {
         anyhow!("Failed to compile typst code:\n\n{errs}")
     })?;
 
-    // If no background color is specified, it is transparent by default.
+    // Color doesn't matter, it is already set by the document itself
     let png = typst_render::render_merged(&document, 4.0, Abs::zero(), None).encode_png()?;
 
     Ok(png)
