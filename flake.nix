@@ -11,12 +11,9 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     crane.url = "github:ipetkov/crane";
-
-    typst-packages.url = "github:typst/packages";
-    typst-packages.flake = false;
   };
 
-  outputs = { self, nixpkgs, crane, typst-packages }:
+  outputs = { self, nixpkgs, crane }:
     let forAllSystems = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed;
     in rec {
       packages = exported-packages;
@@ -35,25 +32,32 @@
             ];
           };
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-          texliveCombined = (pkgs.texlive.combine {
-            inherit (pkgs.texlive)
-              babel-german
-              bussproofs
-              unicode-math
-              fontspec
-              latexmk
-              preview
-              lm
-              lm-math
-              scheme-basic
-              standalone
-              xcolor
-              xetex
-              braket
-              ;
-          });
+          # Unversioned attributes select the newest published version in the
+          # pinned Nixpkgs. Keep older versions recorded as dependencies there.
+          latestTypstPackages = builtins.attrValues (pkgs.lib.filterAttrs
+            (name: package: pkgs.lib.isDerivation package && name == package.pname)
+            pkgs.typstPackages);
+          bundledTypstPackages = pkgs.lib.closePropagation latestTypstPackages;
+          texliveCombined = pkgs.texliveBasic.withPackages (ps: with ps; [
+            babel-german
+            bussproofs
+            unicode-math
+            fontspec
+            latexmk
+            preview
+            lm
+            lm-math
+            standalone
+            xcolor
+            xetex
+            braket
+          ]);
         in
         rec {
+          typst-packages = pkgs.linkFarm "typst-packages" (map (package: {
+            name = "preview/${package.pname}/${package.version}";
+            path = "${package}/lib/typst-packages/${package.pname}/${package.version}";
+          }) bundledTypstPackages);
           latexfogel = craneLib.buildPackage (commonArgs // {
             inherit cargoArtifacts;
           });
@@ -77,7 +81,7 @@
               WorkingDir = "/";
               Env = [
                 "FONTCONFIG_FILE=${pkgs.makeFontsConf { fontDirectories = [ texliveCombined.fonts pkgs.noto-fonts pkgs.noto-fonts-color-emoji ]; }}"
-                "TYPST_PACKAGES=${typst-packages}/packages"
+                "TYPST_PACKAGES=${typst-packages}"
                 "HOME=/tmp"
               ];
             };

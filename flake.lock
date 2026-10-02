@@ -34,24 +34,7 @@
     "root": {
       "inputs": {
         "crane": "crane",
-        "nixpkgs": "nixpkgs",
-        "typst-packages": "typst-packages"
-      }
-    },
-    "typst-packages": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1790951155,
-        "narHash": "sha256-4u4GfNfzFD9lMzVzGUqTEuRMFCxm7fc9ODC8IW3FzRo=",
-        "owner": "typst",
-        "repo": "packages",
-        "rev": "e7d9243f08065af6b09d26eb0e60c44ea9e9dbee",
-        "type": "github"
-      },
-      "original": {
-        "owner": "typst",
-        "repo": "packages",
-        "type": "github"
+        "nixpkgs": "nixpkgs"
       }
     }
   },
