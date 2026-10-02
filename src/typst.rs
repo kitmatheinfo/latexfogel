@@ -8,12 +8,12 @@ use std::{
 use anyhow::anyhow;
 use typst::{
     diag::{FileError, FileResult},
-    foundations::{Bytes, Datetime},
+    foundations::{Bytes, Datetime, Duration},
     layout::Abs,
-    syntax::{FileId, Source},
+    syntax::{FileId, Source, VirtualRoot},
     text::{Font, FontBook, FontInfo},
-    utils::LazyHash,
-    Library, World,
+    utils::{LazyHash, Scalar},
+    Library, LibraryExt, World,
 };
 
 use crate::docker::DockerCommand;
@@ -32,7 +32,7 @@ impl FontSlot {
     pub fn get(&self) -> Option<Font> {
         self.font
             .get_or_init(|| {
-                let data = fs::read(&self.path).ok()?.into();
+                let data = Bytes::new(fs::read(&self.path).ok()?);
                 Font::new(data, self.index)
             })
             .clone()
@@ -55,7 +55,7 @@ impl FontLoader {
     fn load_embedded_fonts(&mut self) {
         // https://github.com/typst/typst/blob/be12762d942e978ddf2e0ac5c34125264ab483b7/crates/typst-cli/src/fonts.rs#L107-L121
         for font_file in typst_assets::fonts() {
-            let font_data = Bytes::from_static(font_file);
+            let font_data = Bytes::new(font_file);
             for (i, font) in Font::iter(font_data).enumerate() {
                 self.book.push(font.info().clone());
                 self.fonts.push(FontSlot {
@@ -113,7 +113,7 @@ impl DummyWorld {
 }
 
 fn load_package_file(id: FileId) -> FileResult<Bytes> {
-    let Some(package) = id.package() else {
+    let VirtualRoot::Package(package) = id.root() else {
         return Err(FileError::Other(Some(
             "only packages can be imported".into(),
         )));
@@ -128,14 +128,14 @@ fn load_package_file(id: FileId) -> FileResult<Bytes> {
     path.push(package.namespace.as_str());
     path.push(package.name.as_str());
     path.push(package.version.to_string());
-    path.push(id.vpath().as_rootless_path());
+    path.push(id.vpath().get_without_slash());
 
     let file = fs::read(&path).map_err(|e| match e.kind() {
         ErrorKind::NotFound => FileError::NotFound(path),
         _ => FileError::AccessDenied,
     })?;
 
-    Ok(file.into())
+    Ok(Bytes::new(file))
 }
 
 impl World for DummyWorld {
@@ -169,7 +169,7 @@ impl World for DummyWorld {
         self.fonts[index].get()
     }
 
-    fn today(&self, _offset: Option<i64>) -> Option<Datetime> {
+    fn today(&self, _offset: Option<Duration>) -> Option<Datetime> {
         None
     }
 }
@@ -197,7 +197,11 @@ pub fn render_to_png(typst: String) -> anyhow::Result<Vec<u8>> {
     })?;
 
     // Color doesn't matter, it is already set by the document itself
-    let png = typst_render::render_merged(&document, 4.0, Abs::zero(), None).encode_png()?;
+    let options = typst_render::RenderOptions {
+        pixel_per_pt: Scalar::new(4.0),
+        ..Default::default()
+    };
+    let png = typst_render::render_merged(&document, &options, Abs::zero(), None).encode_png()?;
 
     Ok(png)
 }
@@ -237,4 +241,31 @@ pub async fn render_typst(
 
     let png = output.stdout.to_vec();
     Ok(RenderedTypst { png })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_to_png;
+
+    #[test]
+    fn renders_math_and_merges_pages() {
+        let single = render_to_png("$ integral_0^1 x^2 dif x $".into()).unwrap();
+        let single = image::load_from_memory(&single).unwrap();
+        let multiple =
+            render_to_png("$ integral_0^1 x^2 dif x $ #pagebreak() $ sqrt(2) $".into()).unwrap();
+        let multiple = image::load_from_memory(&multiple).unwrap();
+
+        assert!(single.height() > 0);
+        // The renderer keeps the 11.5 cm page width at four pixels per point.
+        assert_eq!(single.width(), 1304);
+        assert_eq!(multiple.width(), single.width());
+        assert!(multiple.height() > single.height());
+    }
+
+    #[test]
+    fn reports_invalid_typst() {
+        let error = render_to_png("#unknown_function()".into()).unwrap_err();
+        assert!(error.to_string().contains("Failed to compile typst code"));
+        assert!(error.to_string().contains("unknown_function"));
+    }
 }

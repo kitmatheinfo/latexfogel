@@ -92,6 +92,12 @@ fn button_wider(owner: UserId) -> CreateButton {
         .emoji(ReactionType::Unicode("↔️".to_string()))
 }
 
+fn reply_with_delete(ctx: Context<'_>) -> CreateReply {
+    CreateReply::default().components(vec![CreateActionRow::Buttons(vec![button_delete(
+        ctx.author().id,
+    )])])
+}
+
 #[poise::command(prefix_command)]
 pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
     poise::builtins::register_application_commands_buttons(ctx).await?;
@@ -112,7 +118,7 @@ async fn wolfram(
         let result = ctx.data().wolfram_alpha.simple_query(&query).await?;
         let images = WolframAlphaSimpleResult::group_images(result.slice_image()?, 400);
         ctx.send({
-            let mut reply = CreateReply::default().reply(true);
+            let mut reply = reply_with_delete(ctx).reply(true);
 
             // Max is 10 but be nice
             for (idx, img) in images.iter().take(6).enumerate() {
@@ -129,7 +135,7 @@ async fn wolfram(
     } else {
         let result = ctx.data().wolfram_alpha.short_answer(&query).await?;
         ctx.send(
-            CreateReply::default().reply(true).embed(
+            reply_with_delete(ctx).reply(true).embed(
                 CreateEmbed::default()
                     .title("Wolfram Alpha's result")
                     .description(result),
@@ -166,7 +172,7 @@ async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Erro
         Err(error) => {
             let handle = ctx
                 .send(
-                    CreateReply::default().embed(
+                    reply_with_delete(ctx).embed(
                         CreateEmbed::default()
                             .title("Error rendering LaTeX")
                             .title("You can edit your message and try again.")
@@ -188,7 +194,7 @@ async fn tex_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Erro
     let handle = ctx
         .send({
             let mut reply =
-                CreateReply::default().attachment(CreateAttachment::bytes(image.png, "latex.png"));
+                reply_with_delete(ctx).attachment(CreateAttachment::bytes(image.png, "latex.png"));
 
             if image.overrun_hbox {
                 reply = reply.components(vec![CreateActionRow::Buttons(vec![
@@ -242,7 +248,7 @@ async fn typst_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Er
         Err(error) => {
             let handle = ctx
                 .send(
-                    CreateReply::default().embed(
+                    reply_with_delete(ctx).embed(
                         CreateEmbed::default()
                             .title("Error rendering typst")
                             .title("You can edit your message and try again.")
@@ -262,7 +268,7 @@ async fn typst_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Er
     };
 
     let handle = ctx
-        .send(CreateReply::default().attachment(CreateAttachment::bytes(image.png, "typst.png")))
+        .send(reply_with_delete(ctx).attachment(CreateAttachment::bytes(image.png, "typst.png")))
         .await?;
 
     let response = handle.message().await?;
@@ -277,7 +283,6 @@ async fn typst_context_menu(ctx: Context<'_>, message: Message) -> Result<(), Er
 async fn handle_event<'a>(
     ctx: &'a serenity::Context,
     event: &'a FullEvent,
-    _framework: poise::FrameworkContext<'a, BotContext, Error>,
     data: &'a BotContext,
 ) -> Result<(), Error> {
     if let FullEvent::InteractionCreate { interaction } = event {
@@ -431,18 +436,13 @@ pub async fn start_bot(bot_context: BotContext) -> anyhow::Result<()> {
                 case_insensitive_commands: true,
                 ..Default::default()
             },
-            event_handler: |ctx, event, framework, data| {
-                Box::pin(handle_event(ctx, event, framework, data))
+            event_handler: |framework, event| {
+                Box::pin(handle_event(
+                    framework.serenity_context,
+                    event,
+                    framework.user_data,
+                ))
             },
-            reply_callback: Some(|ctx, reply| {
-                if reply.components.is_none() {
-                    reply.components(vec![CreateActionRow::Buttons(vec![button_delete(
-                        ctx.author().id,
-                    )])])
-                } else {
-                    reply
-                }
-            }),
             pre_command: |ctx| {
                 Box::pin(async move {
                     info!(

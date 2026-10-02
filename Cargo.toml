@@ -2,20 +2,22 @@
 name = "latexfogel"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.92"
 
 [dependencies]
-anyhow = "1.0.91"
-clap = { version = "4.5.20", features = ["derive", "deprecated"] }
-env_logger = "0.11.5"
-fontdb = "0.23.0"
-image = "0.25.4"
-log = "0.4.22"
-poise = "0.6.1"
-reqwest = { version = "0.12.9", default-features = false, features = [
-    "rustls-tls-native-roots",
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive", "deprecated"] }
+env_logger = "0.11.11"
+fontdb = "0.24.0"
+image = "0.25.10"
+log = "0.4.34"
+poise = "0.7.0"
+reqwest = { version = "0.13.5", default-features = false, features = [
+    "rustls",
+    "query",
 ] }
-tempfile = "3.13.0"
-tokio = { version = "1.41.0", features = ["full"] }
-typst = "0.12.0"
-typst-assets = { version = "0.12.0", features = ["fonts"] }
-typst-render = "0.12.0"
+tempfile = "3.27.0"
+tokio = { version = "1.53.1", features = ["full"] }
+typst = "0.15.1"
+typst-assets = { version = "0.15.1", features = ["fonts"] }
+typst-render = "0.15.1"

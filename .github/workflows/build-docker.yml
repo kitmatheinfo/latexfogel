@@ -19,17 +19,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@65d7c888b2778e8cf30a07a88422ccb23499bfb8 # v4
-      - uses: DeterminateSystems/magic-nix-cache-action@8a218f9e264e9c3803c9a1ee1c30d8e4ab55be63 # v2
+        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
       - name: Check Nixpkgs inputs
-        uses: DeterminateSystems/flake-checker-action@4b90f9fc724969ff153fe1803460917c84fe00a3 # v5
+        uses: DeterminateSystems/flake-checker-action@786422608c7bded2bbc9741ad9f91356842bf520 # v14
         with:
           fail-mode: false
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6.2.0
         with:
           images: "${{ env.IMAGE_NAME }}"
           sep-tags: ","
@@ -45,7 +45,7 @@ jobs:
             type=sha,format=long
 
       - name: Login to registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4.6.0
         with:
           registry: ghcr.io
           username: "${{ github.repository_owner }}"

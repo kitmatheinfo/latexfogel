@@ -10,14 +10,13 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-    naersk.url = "github:nix-community/naersk";
-    naersk.inputs.nixpkgs.follows = "nixpkgs";
+    crane.url = "github:ipetkov/crane";
 
     typst-packages.url = "github:typst/packages";
     typst-packages.flake = false;
   };
 
-  outputs = { self, nixpkgs, naersk, typst-packages }:
+  outputs = { self, nixpkgs, crane, typst-packages }:
     let forAllSystems = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed;
     in rec {
       packages = exported-packages;
@@ -26,7 +25,16 @@
       exported-packages = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
-          naersk' = pkgs.callPackage naersk { };
+          craneLib = crane.mkLib pkgs;
+          commonArgs = {
+            src = craneLib.cleanCargoSource ./.;
+            strictDeps = true;
+            nativeBuildInputs = [ pkgs.cmake pkgs.pkg-config ];
+            buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+              pkgs.libiconv
+            ];
+          };
+          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
           texliveCombined = (pkgs.texlive.combine {
             inherit (pkgs.texlive)
               babel-german
@@ -46,7 +54,9 @@
           });
         in
         rec {
-          latexfogel = naersk'.buildPackage { src = ./.; };
+          latexfogel = craneLib.buildPackage (commonArgs // {
+            inherit cargoArtifacts;
+          });
           default = latexfogel;
           docker = pkgs.dockerTools.buildLayeredImage {
             name = "ghcr.io/kitmatheinfo/latexfogel";
